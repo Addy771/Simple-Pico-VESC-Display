@@ -1,0 +1,1 @@
+docker run --rm -it -v /c/VSARM/sdk/pico/pico-sdk:/pico-sdk -v "/c/VSARM/repos/vesc-display:/project" xingrz/rpi-pico-builder:latest bash -c 'mkdir -p build && cd build && cmake .. && make display'

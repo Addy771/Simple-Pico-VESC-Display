@@ -1,0 +1,3 @@
+[submodule "pico-oled"]
+	path = pico-oled
+	url = https://github.com/Addy771/pico-oled.git
