@@ -38,6 +38,7 @@
 #define UART_BAUDRATE 115200
 #define UART_TX_GPIO 0          // UART0 TX default pin is GP0 (Pico pin 1)
 #define UART_RX_GPIO 1          // UART0 RX default pin is GP1 (Pico pin 2)
+#define DEBUG_GPIO 22           // Timing measurement debug output
 
 #define log_sample_rate 10      // How often to sample data from VESC (in Hz)
 
@@ -151,11 +152,11 @@ void uart0_write(uint8_t * src, size_t len)
 
 uint8_t receive_packet(PACKET_STATE_t *rx_packet)
 {
-    // Wait up to 50ms for the initial response
-    if (uart_is_readable_within_us(uart0, 50000))
+    // Wait up to 10ms for the initial response
+    if (uart_is_readable_within_us(uart0, 10000))
     {
-        // Read each byte of the response until there is no more data sent for 10ms
-        while(uart_is_readable_within_us(uart0, 10000))
+        // Read each byte of the response until there is no more data sent for 30 bits worth of time
+        while(uart_is_readable_within_us(uart0, (1e6*30)/UART_BAUDRATE))
         {
             packet_process_byte(uart_getc(uart0), rx_packet);
         }
@@ -182,6 +183,10 @@ void core1_entry()
     // Set the LED pin as an output
     gpio_init(LED_PIN);
     gpio_set_dir(LED_PIN, GPIO_OUT);
+
+    // Set up debug output
+    gpio_init(DEBUG_GPIO);
+    gpio_set_dir(DEBUG_GPIO, GPIO_OUT);
 
     // Initialize UART0 and it's GPIO pins
     real_baudrate = uart_init(uart0, UART_BAUDRATE);
@@ -224,8 +229,10 @@ void core1_entry()
         // Reset packet that was sent so it can be reused
         packet_reset(&vesc_comm);
 
+
         // Wait for the response packet and process it
         receive_packet(&vesc_comm);
+
         
         // Prepare COMM_GET_DECODED_ADC packet
         packet_init(uart0_write, process_data, &vesc_comm);
@@ -251,6 +258,7 @@ void process_data(uint8_t *data, size_t len)
     // Check packet ID and handle different packets accordingly ***
     int32_t idx = 0;
     uint8_t packet_id = data[idx++];
+
 
     switch (packet_id)
     {
@@ -306,6 +314,7 @@ void process_data(uint8_t *data, size_t len)
             break;
 
     }
+
 }
 
 
