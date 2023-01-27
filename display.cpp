@@ -72,7 +72,7 @@ int main()
 
     
     // Instantiate display and initialize it
-    pico_oled display(DISPLAY_I2C_ADDR, DISPLAY_WIDTH, DISPLAY_HEIGHT);   
+    pico_oled display(OLED_SSD1309, DISPLAY_I2C_ADDR, DISPLAY_WIDTH, DISPLAY_HEIGHT, /*reset_gpio=*/ 15); 
     display.oled_init();
 
     display.set_font(too_simple);
