@@ -10,7 +10,9 @@ A dashboard display for Personal Electric Vehicles based on the Raspberry Pi Pic
 
 # License
 This project is licensed under the [CC BY-NC 4.0 license](https://creativecommons.org/licenses/by-nc/4.0/), except for source files covered by existing licenses: 
+
 [VESC](https://github.com/vedderb/bldc) firmware ([GNU GPL V3+](http://www.gnu.org/licenses/)).
+
 [Button-debouncer](https://github.com/GitJer/Some_RPI-Pico_stuff) ([MIT License](https://github.com/GitJer/Some_RPI-Pico_stuff/blob/main/LICENSE))
 
 
