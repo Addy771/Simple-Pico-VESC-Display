@@ -47,6 +47,11 @@ add_executable(${TARGET_NAME}
 	packet.c	
 	)
 
+pico_generate_pio_header(${TARGET_NAME} ${CMAKE_CURRENT_LIST_DIR}/Button-debouncer/button_debounce.pio)
+
+target_sources(${TARGET_NAME} PRIVATE ./Button-debouncer/button_debounce.cpp)
+	
+
 set_source_files_properties(crc.c PROPERTIES LANGUAGE CXX)
 set_source_files_properties(buffer.c PROPERTIES LANGUAGE CXX)
 set_source_files_properties(packet.c PROPERTIES LANGUAGE CXX)
@@ -62,6 +67,7 @@ target_link_libraries(${TARGET_NAME}
 	hardware_adc 
 	hardware_pwm 
 	hardware_uart 
+	hardware_pio
 	)
 
 

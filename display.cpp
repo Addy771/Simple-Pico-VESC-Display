@@ -30,6 +30,7 @@
 
 #include "util_enum.h"
 #include <string.h>
+#include "Button-debouncer/button_debounce.h"
 
 #define DISPLAY_I2C_ADDR _u(0x3C)
 #define DISPLAY_WIDTH _u(128)
@@ -39,6 +40,8 @@
 #define UART_TX_GPIO 0          // UART0 TX default pin is GP0 (Pico pin 1)
 #define UART_RX_GPIO 1          // UART0 RX default pin is GP1 (Pico pin 2)
 #define DEBUG_GPIO 22           // Timing measurement debug output
+#define PB_LEFT_GPIO 21         // Left-side pushbutton
+#define PB_RIGHT_GPIO 20        // Right-side pushbutton
 
 #define log_sample_rate 10      // How often to sample data from VESC (in Hz)
 
@@ -70,6 +73,17 @@ int main()
     gpio_pull_up(PICO_DEFAULT_I2C_SDA_PIN);
     gpio_pull_up(PICO_DEFAULT_I2C_SCL_PIN);
 
+    // Instantiate debouncer and configure GPIO
+    Debounce debouncer;
+    // gpio_pull_up(PB_LEFT_GPIO);
+    // gpio_pull_up(PB_RIGHT_GPIO);
+
+    debouncer.debounce_gpio(PB_LEFT_GPIO);
+    debouncer.set_debounce_time(PB_LEFT_GPIO, 20.0);    // 20ms debounce time
+
+    debouncer.debounce_gpio(PB_RIGHT_GPIO);
+    debouncer.set_debounce_time(PB_RIGHT_GPIO, 20.0);
+
     
     // Instantiate display and initialize it
     pico_oled display(OLED_SSD1309, DISPLAY_I2C_ADDR, DISPLAY_WIDTH, DISPLAY_HEIGHT, /*reset_gpio=*/ 15); 
@@ -95,6 +109,20 @@ int main()
 
     display.render();
     sleep_ms(2000);    
+
+    // uint8_t box_w = 4;
+    // uint8_t box_h = 4;
+
+    // display.fill_rect(0, 5, 20, 8, 23);
+    // display.draw_fast_hline(10, 20, 20);
+    // display.draw_fast_hline(10, 20, 23);
+
+    // display.draw_box(5, 30, 8, 33);
+
+    // display.render();
+
+    // for(;;);
+
 
     // Start core 1
     multicore_launch_core1(core1_entry);
@@ -138,6 +166,17 @@ int main()
         // }        
 
         mutex_exit(&float_mutex);
+
+        // Pushbuttons are active-high
+        if (debouncer.read(PB_LEFT_GPIO))
+            display.fill_rect(0, 80, 30, 100, 50);
+        else
+            display.draw_box(80, 30, 100, 50);
+
+        if (debouncer.read(PB_RIGHT_GPIO))
+            display.fill_rect(0, 105, 30, 125, 50);
+        else
+            display.draw_box(105, 30, 125, 50);
 
         display.render();
     }
