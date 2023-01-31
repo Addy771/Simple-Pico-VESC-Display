@@ -18,10 +18,10 @@
 #include "hardware/uart.h"
 
 #include "pico-oled/pico-oled.hpp"
-
 #include "pico-oled/gfx_font.h"
 #include "pico-oled/font/press_start_2p.h"
 #include "pico-oled/font/too_simple.h"
+#include "nv_flash.hpp"
 
 #include "datatypes.h"
 #include "packet.h"
@@ -56,7 +56,13 @@ mc_values rt_data;
 float adc_v1, adc_v2;
 float adc_decoded1, adc_decoded2;
 
+uint8_t pb_left_state, pb_left_prev_state;
+uint8_t pb_right_state, pb_right_prev_state;
+
 auto_init_mutex(float_mutex);
+auto_init_mutex(flash_lock);
+
+nv_flash_storage nv_settings(&flash_lock);
 
 
 // Core 0
@@ -84,6 +90,9 @@ int main()
     debouncer.debounce_gpio(PB_RIGHT_GPIO);
     debouncer.set_debounce_time(PB_RIGHT_GPIO, 20.0);
 
+    // Set initial values of button states
+    pb_left_prev_state = pb_left_state = debouncer.read(PB_LEFT_GPIO);
+    pb_right_prev_state = pb_right_state = debouncer.read(PB_RIGHT_GPIO);
     
     // Instantiate display and initialize it
     pico_oled display(OLED_SSD1309, DISPLAY_I2C_ADDR, DISPLAY_WIDTH, DISPLAY_HEIGHT, /*reset_gpio=*/ 15); 
@@ -91,7 +100,6 @@ int main()
 
     display.set_font(too_simple);
     //display.set_font(press_start_2p);
-
 
     // Print out some system information
     uint32_t f_clk_sys = frequency_count_khz(CLOCKS_FC0_SRC_VALUE_CLK_SYS);
@@ -142,14 +150,18 @@ int main()
         // display.print_num("TMOT: %.1fC\n", rt_data.temp_motor);        
         // display.print_num("ERPM: %d\n", rt_data.rpm);  
         //display.print_num("ADC1_RAW: %.1fV\n", adc_v1);
-        display.print_num("ADC1_DEC: %.3f\n", adc_decoded1);
+        //display.print_num("ADC1_DEC: %.3f\n", adc_decoded1);
         //display.print_num("ADC2_RAW: %.1fV\n", adc_v2);
-        display.print_num("ADC2_DEC: %.3f\n", adc_decoded2);
+        //display.print_num("ADC2_DEC: %.3f\n", adc_decoded2);
 
         display.draw_vbar(adc_decoded1*100, 4, 20, 8, 60);
 
         display.draw_hbar(adc_decoded1*100, 1, 20, 20, 60, 24);
         display.draw_hbar(adc_decoded1*100, 0, 70, 20, 110, 24);        
+
+        display.print_num("BRIGHTNESS: %d\n", nv_settings.data.disp_brightness);
+        display.print_num("FLASH PG=%d", nv_settings.page_id);
+        display.print_num("    BLOCK=%d", nv_settings.block_id);
 
         // char hex_str[10];
         // uint8_t cols = 0;
@@ -167,18 +179,42 @@ int main()
 
         mutex_exit(&float_mutex);
 
-        // Pushbuttons are active-high
-        if (debouncer.read(PB_LEFT_GPIO))
+        // Process inputs
+        pb_left_state = debouncer.read(PB_LEFT_GPIO);
+        pb_right_state = debouncer.read(PB_RIGHT_GPIO);
+
+        // Draw the state of the buttons
+        if (pb_left_state)
             display.fill_rect(0, 80, 30, 100, 50);
         else
             display.draw_box(80, 30, 100, 50);
 
-        if (debouncer.read(PB_RIGHT_GPIO))
+        if (pb_right_state)
             display.fill_rect(0, 105, 30, 125, 50);
         else
             display.draw_box(105, 30, 125, 50);
 
+        // If left PB was just pressed
+        if (pb_left_state && !pb_left_prev_state)
+        {
+            nv_settings.data.disp_brightness -= 16;
+            display.set_brightness(nv_settings.data.disp_brightness);
+            nv_settings.store_data();
+        }
+
+        // If right PB was just pressed
+        if (pb_right_state && !pb_right_prev_state)
+        {
+            nv_settings.data.disp_brightness += 16;
+            display.set_brightness(nv_settings.data.disp_brightness);       
+            nv_settings.store_data();                 
+        }
+
+        pb_left_prev_state = pb_left_state;
+        pb_right_prev_state = pb_right_state;
+
         display.render();
+
     }
 }
 
@@ -242,6 +278,8 @@ void core1_entry()
     next_sample = get_absolute_time();
     while (true)
     {
+        mutex_enter_blocking(&flash_lock);  // Don't allow flash erase/write while running core1 code
+
         sleep_until(next_sample);
         next_sample = delayed_by_ms(next_sample, 1000 / log_sample_rate);
 
@@ -288,6 +326,7 @@ void core1_entry()
         // Wait for the response packet and process it
         receive_packet(&vesc_comm);        
 
+        mutex_exit(&flash_lock);    // Release lock
     }
 }
 

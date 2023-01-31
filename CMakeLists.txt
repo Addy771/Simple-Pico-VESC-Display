@@ -42,6 +42,7 @@ include_directories("./bldc/ChibiOS_3.0.5/os/ext/CMSIS/include/") #core_cm4.h ne
 add_executable(${TARGET_NAME}
 	display.cpp
 	pico-oled/pico-oled.cpp
+	nv_flash.cpp
 	crc.c 
 	buffer.c
 	packet.c	
@@ -63,11 +64,13 @@ target_link_libraries(${TARGET_NAME}
 	pico_stdlib 
 	pico_multicore 
 	pico_sync
+	pico_malloc
 	hardware_i2c 
 	hardware_adc 
 	hardware_pwm 
 	hardware_uart 
 	hardware_pio
+	hardware_flash
 	)
 
 
