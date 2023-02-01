@@ -77,7 +77,10 @@ nv_flash_storage::nv_flash_storage(mutex_t *flash_write_lock)
 /// @brief Write the data structure into the non-volatile flash memory
 void nv_flash_storage::store_data()
 {
+    uint saved_interrupts;
+
     mutex_enter_blocking(write_lock);   // Enter mutex to stop other core from doing flash reads
+    saved_interrupts = save_and_disable_interrupts();   // Disable interrupts to make sure other core doesn't run any code
 
     // Figure out the page and block to write to next
     if (page_id < MAX_PAGES - 1)
@@ -114,6 +117,9 @@ void nv_flash_storage::store_data()
     // Write out the data
     flash_range_program(FLASH_TARGET_OFFSET + page_id*FLASH_PAGE_SIZE, page_buffer, FLASH_PAGE_SIZE);
 
+    restore_interrupts(saved_interrupts);
     mutex_exit(write_lock);     // Release lock now that flash erase/write is complete
+
+    free(page_buffer);
 
 }
