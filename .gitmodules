@@ -1,3 +1,6 @@
 [submodule "pico-oled"]
 	path = pico-oled
 	url = https://github.com/Addy771/pico-oled.git
+[submodule "FatFS-SD"]
+	path = FatFS-SD
+	url = https://github.com/carlk3/no-OS-FatFS-SD-SPI-RPi-Pico.git
