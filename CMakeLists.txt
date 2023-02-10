@@ -38,6 +38,7 @@ include_directories("./bitmap")
 include_directories("./bldc/tests/utils_math")	# ch.h needed
 include_directories("./bldc/ChibiOS_3.0.5/os/ext/CMSIS/ST/") #stm32f4xx.h needed
 include_directories("./bldc/ChibiOS_3.0.5/os/ext/CMSIS/include/") #core_cm4.h needed
+add_subdirectory(FatFS-SD/FatFs_SPI build)
 
 add_executable(${TARGET_NAME}
 	display.cpp
@@ -46,6 +47,7 @@ add_executable(${TARGET_NAME}
 	crc.c 
 	buffer.c
 	packet.c	
+	hw_config.c
 	)
 
 pico_generate_pio_header(${TARGET_NAME} ${CMAKE_CURRENT_LIST_DIR}/Button-debouncer/button_debounce.pio)
@@ -71,11 +73,12 @@ target_link_libraries(${TARGET_NAME}
 	hardware_uart 
 	hardware_pio
 	hardware_flash
+	FatFs_SPI
 	)
 
 
 # enable usb output, disable uart output
-#pico_enable_stdio_usb(${TARGET_NAME} 1)
+pico_enable_stdio_usb(${TARGET_NAME} 1)
 #pico_enable_stdio_uart(${TARGET_NAME} 1)
 
 # create map/bin/hex file etc.

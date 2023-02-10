@@ -9,20 +9,6 @@
 #include "nv_flash.hpp"
 
 
-
-/*
-
-PICO_FLASH_SIZE_BYTES # The total size of the RP2040 flash, in bytes
-FLASH_SECTOR_SIZE     # The size of one sector, in bytes (the minimum amount you can erase)
-FLASH_PAGE_SIZE       # The size of one page, in bytes (the mimimum amount you can write)
-
-flash_range_erase(uint32_t flash_offs, size_t count);
-flash_range_program(uint32_t flash_offs, const uint8_t *data, size_t count);
-offsetof()
-
-*/
-
-
 /// @brief A non-volatile data manager which uses the code flash memory for storage
 /// @param flash_write_lock A mutex which will be used to suspend execution on the other processor core
 nv_flash_storage::nv_flash_storage(mutex_t *flash_write_lock)

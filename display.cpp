@@ -1,7 +1,3 @@
-/**
- *
- */
-
 #include <stdlib.h>
 #include <stdio.h>
 #include "pico/stdlib.h"
@@ -31,6 +27,11 @@
 #include "util_enum.h"
 #include <string.h>
 #include "Button-debouncer/button_debounce.h"
+#include "sd_card.h"
+#include "ff.h"
+#include "f_util.h"
+#include "hw_config.h"
+#include "rtc.h"
 
 #define DISPLAY_I2C_ADDR _u(0x3C)
 #define DISPLAY_WIDTH _u(128)
@@ -69,7 +70,12 @@ nv_flash_storage nv_settings(&flash_lock);
 int main()
 {
 
-    //stdio_init_all();
+    stdio_init_all();
+    time_init();    
+
+    // Set Pico DC/DC converter to PWM mode to reduce noise at light load
+    gpio_put(23, 1);
+
 
     // Init i2c and configure it's GPIO pins
     //uint32_t i2c_clk = i2c_init(i2c_default, 400 * 1000);
@@ -117,20 +123,6 @@ int main()
 
     display.render();
     sleep_ms(2000);    
-
-    // uint8_t box_w = 4;
-    // uint8_t box_h = 4;
-
-    // display.fill_rect(0, 5, 20, 8, 23);
-    // display.draw_fast_hline(10, 20, 20);
-    // display.draw_fast_hline(10, 20, 23);
-
-    // display.draw_box(5, 30, 8, 33);
-
-    // display.render();
-
-    // for(;;);
-
 
     // Start core 1
     multicore_launch_core1(core1_entry);
@@ -252,12 +244,12 @@ void process_data(uint8_t *data, size_t len);
 // Second core thread. Handles UART communication
 void core1_entry()
 {
-    const uint LED_PIN = PICO_DEFAULT_LED_PIN;
+    const uint BUILTIN_LED_PIN = PICO_DEFAULT_LED_PIN;
     // uint8_t LED_STATUS = 1;
 
     // Set the LED pin as an output
-    gpio_init(LED_PIN);
-    gpio_set_dir(LED_PIN, GPIO_OUT);
+    gpio_init(BUILTIN_LED_PIN);
+    gpio_set_dir(BUILTIN_LED_PIN, GPIO_OUT);
 
     // Set up debug output
     gpio_init(DEBUG_GPIO);
