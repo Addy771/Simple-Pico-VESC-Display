@@ -1,15 +1,8 @@
-/*
-
-PICO_FLASH_SIZE_BYTES # The total size of the RP2040 flash, in bytes
-FLASH_SECTOR_SIZE     # The size of one sector, in bytes (the minimum amount you can erase)
-FLASH_PAGE_SIZE       # The size of one page, in bytes (the mimimum amount you can write)
-
-flash_range_erase(uint32_t flash_offs, size_t count);
-flash_range_program(uint32_t flash_offs, const uint8_t *data, size_t count);
-
-*/
+#ifndef NV_FLASH_H
+#define NV_FLASH_H
 
 #include <hardware/flash.h>
+#include "pico/sync.h"
 
 
 #define FLASH_TARGET_OFFSET (PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE) // Start of last sector of flash
@@ -24,6 +17,7 @@ typedef struct
 {
     uint8_t write_mark;
     uint8_t disp_brightness;
+    uint32_t log_num;
 } nv_flash_struct;
 
 
@@ -41,3 +35,7 @@ class nv_flash_storage
 
 };
 
+extern mutex_t flash_lock;
+extern nv_flash_storage nv_settings;
+
+#endif /* NV_FLASH_H */

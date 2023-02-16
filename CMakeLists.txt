@@ -44,6 +44,7 @@ add_executable(${TARGET_NAME}
 	display.cpp
 	pico-oled/pico-oled.cpp
 	nv_flash.cpp
+	log.cpp
 	crc.c 
 	buffer.c
 	packet.c	

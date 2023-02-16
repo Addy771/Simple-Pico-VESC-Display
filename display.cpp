@@ -18,6 +18,7 @@
 #include "pico-oled/font/press_start_2p.h"
 #include "pico-oled/font/too_simple.h"
 #include "nv_flash.hpp"
+#include "log.hpp"
 
 #include "datatypes.h"
 #include "packet.h"
@@ -32,19 +33,11 @@
 #include "f_util.h"
 #include "hw_config.h"
 #include "rtc.h"
+#include "hw_def.h"
 
 #define DISPLAY_I2C_ADDR _u(0x3C)
 #define DISPLAY_WIDTH _u(128)
 #define DISPLAY_HEIGHT _u(64)
-
-#define UART_BAUDRATE 115200
-#define UART_TX_GPIO 0          // UART0 TX default pin is GP0 (Pico pin 1)
-#define UART_RX_GPIO 1          // UART0 RX default pin is GP1 (Pico pin 2)
-#define DEBUG_GPIO 22           // Timing measurement debug output
-#define PB_LEFT_GPIO 21         // Left-side pushbutton
-#define PB_RIGHT_GPIO 20        // Right-side pushbutton
-
-#define log_sample_rate 10      // How often to sample data from VESC (in Hz)
 
 void core1_entry();
 
@@ -61,9 +54,10 @@ uint8_t pb_left_state, pb_left_prev_state;
 uint8_t pb_right_state, pb_right_prev_state;
 
 auto_init_mutex(float_mutex);
-auto_init_mutex(flash_lock);
 
-nv_flash_storage nv_settings(&flash_lock);
+pico_oled display(OLED_SSD1309, DISPLAY_I2C_ADDR, DISPLAY_WIDTH, DISPLAY_HEIGHT, /*reset_gpio=*/ 15); 
+
+Debounce debouncer;
 
 
 // Core 0
@@ -76,6 +70,10 @@ int main()
     // Set Pico DC/DC converter to PWM mode to reduce noise at light load
     gpio_put(23, 1);
 
+    // Init debug GPIO
+    gpio_init(DEBUG_GPIO);
+    gpio_set_dir(DEBUG_GPIO, GPIO_OUT);
+    gpio_put(DEBUG_GPIO, 1);
 
     // Init i2c and configure it's GPIO pins
     //uint32_t i2c_clk = i2c_init(i2c_default, 400 * 1000);
@@ -86,7 +84,7 @@ int main()
     gpio_pull_up(PICO_DEFAULT_I2C_SCL_PIN);
 
     // Instantiate debouncer and configure GPIO
-    Debounce debouncer;
+
     // gpio_pull_up(PB_LEFT_GPIO);
     // gpio_pull_up(PB_RIGHT_GPIO);
 
@@ -100,8 +98,6 @@ int main()
     pb_left_prev_state = pb_left_state = debouncer.read(PB_LEFT_GPIO);
     pb_right_prev_state = pb_right_state = debouncer.read(PB_RIGHT_GPIO);
     
-    // Instantiate display and initialize it
-    pico_oled display(OLED_SSD1309, DISPLAY_I2C_ADDR, DISPLAY_WIDTH, DISPLAY_HEIGHT, /*reset_gpio=*/ 15); 
     display.oled_init();
 
     display.set_font(too_simple);
@@ -119,9 +115,20 @@ int main()
     // display.print_num("%d kHz\n", f_clk_sys);
     // display.print("Baudrate: ");
     // display.print_num("%d Bps\n", real_baudrate);
-    
-
+    display.print("PRESS ANY BUTTON TO TEST SD\n");
     display.render();
+
+    while(!debouncer.read(PB_LEFT_GPIO) && !debouncer.read(PB_RIGHT_GPIO));
+
+    gpio_put(DEBUG_GPIO, 0);
+    uint8_t result = init_filesystem();
+    gpio_put(DEBUG_GPIO, 1);
+
+    display.print_num("INIT DONE. CODE: %d", result);
+    display.render();
+    for(;;);
+
+
     sleep_ms(2000);    
 
     // Start core 1
