@@ -11,46 +11,37 @@
 #include "hw_config.h"
 #include "hw_def.h"
 
+#include "bitmap/sd.h"
+#include "bitmap/noSD.h"
+#include "bitmap/sd_write.h"
+
 
 extern pico_oled display;
 extern Debounce debouncer;
 
+uint8_t sd_status = SD_NOT_PRESENT;
 
-uint8_t get_next_log_name(char *filename)
-{
-    // If there's a valid source of time, timestamp names should be used
+const char csv_head[] = "ms_today,input_voltage,temp_mos_max,temp_mos_1,temp_mos_2,temp_mos_3,"
+                        "temp_motor,current_motor,current_in,d_axis_current,q_axis_current,"
+                        "erpm,duty_cycle,amp_hours_used,amp_hours_charged,watt_hours_used,"
+                        "watt_hours_charged,tachometer,tachometer_abs,encoder_position,fault_code,"
+                        "vesc_id,d_axis_voltage,q_axis_voltage,input_power,speed_kph,adc1_decoded,adc2_decoded,\n";
 
-    // Otherwise, check what log files exist already
-}
+char log_filename[30] = "";
 
+log_data_t data_pt;
 
 
 uint8_t init_filesystem()
 {
     sd_card_t *pSD = sd_get_by_num(0);
 
+    sd_status = SD_NOT_PRESENT; // Status will be updated if init is successful, otherwise it remains not present
+
     // Try to mount SD card
     FRESULT fr = f_mount(&pSD->fatfs, pSD->pcName, 1);
 
     // display.print(FRESULT_str(fr));
-    // display.print("\r\n");
-
-
-    // switch (fr)
-    // {
-    //     case FR_OK:
-    //         display.print("FAT FILESYSTEM MOUNTED\n");
-    //         break;
-
-    //     case FR_NO_FILESYSTEM:
-    //         display.print("NO FILESYSTEM DETECTED\n");
-    //         break;
-
-    //     case FR_NOT_READY:
-    //         display.print("SD CARD NOT FOUND\n");
-    // }
-
-    // display.render();
 
     // Check if formatting is needed
     // FR_NO_FILESYSTEM
@@ -214,9 +205,142 @@ uint8_t init_filesystem()
         }
 
     }
-    
-    DBG_PRINT("The next log number should be %d", log_num + 1);
+
+    log_num++;
+    DBG_PRINT("The next log number should be %d\n", log_num);
+
+    // Put together log filename if we didn't do this before
+    if (strlen(log_filename) == 0)
+    {
+        strcat(log_filename, log_path);
+        strcat(log_filename, "/");
+        strcat(log_filename, LOG_PREFIX);
+        itoa(log_num, (char *) (log_filename + strlen(log_filename)), 10);
+        strcat(log_filename, ".csv");
+    }
+
+    DBG_PRINT("Filename: %s\n", log_filename);
 
     f_unmount(pSD->pcName);
+
+    sd_status = SD_PRESENT;
     return 0;
+}
+
+
+/// @brief Create next log file and set the CSV columns
+/// @return FRESULT of file operations
+uint8_t create_log_file()
+{
+    sd_card_t *pSD = sd_get_by_num(0);
+    FIL log_fil;
+
+    // Try to mount SD card
+    FRESULT fr = f_mount(&pSD->fatfs, pSD->pcName, 1);    
+
+    if (fr != FR_OK)
+    {
+        sd_status = SD_ERROR;
+        DBG_PRINT("SD mount failed during write attempt!\n%s\n", FRESULT_str(fr));
+        return fr;
+    }
+
+    fr = f_open(&log_fil, log_filename, FA_WRITE | FA_CREATE_ALWAYS);
+
+    if (fr != FR_OK)
+    {
+        sd_status = SD_ERROR;
+        DBG_PRINT("SD open failed during write attempt!\n%s\n", FRESULT_str(fr));
+        return fr;
+    }    
+
+    uint32_t bytes_written;
+
+    fr = f_write(&log_fil, csv_head, strlen(csv_head), &bytes_written);
+
+    if (fr != FR_OK || bytes_written != strlen(csv_head))
+    {
+        sd_status = SD_ERROR;
+        DBG_PRINT("SD write failed!\n%s\n", FRESULT_str(fr));
+        DBG_PRINT("%d/%d bytes written.\n", bytes_written, sizeof(csv_head));
+        return fr;
+    }        
+
+    f_close(&log_fil);
+    f_unmount(pSD->pcName);
+
+    return 0;
+
+}
+
+
+/// @brief 
+/// @return 
+uint8_t append_data_pt()
+{
+    sd_card_t *pSD = sd_get_by_num(0);
+    FIL log_fil;
+
+    // Try to mount SD card
+    FRESULT fr = f_mount(&pSD->fatfs, pSD->pcName, 1);    
+
+    if (fr != FR_OK)
+    {
+        sd_status = SD_ERROR;
+        DBG_PRINT("f_mount() failed during write attempt!\n%s\n", FRESULT_str(fr));
+        return fr;
+    }
+
+    fr = f_open(&log_fil, log_filename, FA_WRITE | FA_OPEN_APPEND);
+
+    if (fr != FR_OK)
+    {
+        sd_status = SD_ERROR;
+        DBG_PRINT("f_open() failed during write attempt!\n%s\n", FRESULT_str(fr));
+        return fr;
+    }    
+
+    // Write out one row worth of data
+    uint16_t bytes_written;
+    f_printf(&log_fil, "%d,%f,%f,%f,%f,%f,", data_pt.ms_today, data_pt.v_in, data_pt.temp_mos, data_pt.temp_mos_1, data_pt.temp_mos_2, data_pt.temp_mos_3);
+    f_printf(&log_fil, "%f,%f,%f,%f,%f,", data_pt.temp_motor, data_pt.current_motor, data_pt.current_in, data_pt.id, data_pt.iq);
+    f_printf(&log_fil, "%f,%f,%f,%f,%f,", data_pt.rpm, data_pt.duty_now, data_pt.amp_hours, data_pt.amp_hours_charged, data_pt.watt_hours);
+    f_printf(&log_fil, "%f,%d,%d,%f,%d,", data_pt.watt_hours_charged, data_pt.tachometer, data_pt.tachometer_abs, data_pt.position, data_pt.fault_code);
+    bytes_written = f_printf(&log_fil, "%d,%f,%f,%f,%f,%f,%f,\n", data_pt.vesc_id, data_pt.vd, data_pt.vq, data_pt.p_in, data_pt.speed_kph, data_pt.adc1_decoded, data_pt.adc2_decoded);
+
+    if (bytes_written < 0)
+    {
+        sd_status = SD_ERROR;
+        DBG_PRINT("f_printf() failed during write attempt!\n");
+        return FR_DISK_ERR;
+    }    
+
+
+    f_close(&log_fil);
+    f_unmount(pSD->pcName);
+
+    return 0;
+}
+
+
+/// @brief Draw the SD icon according to the SD status
+/// @param x screen x coordinate to draw at
+/// @param y screen y coordinate to draw at
+void draw_SD_status(uint8_t x, uint8_t y)
+{
+    switch(sd_status)
+    {
+        case SD_NOT_PRESENT:
+        case SD_ERROR:
+            display.draw_bmp(no_sd_bitmap, no_sd_width, no_sd_height, x, y);
+            break;
+
+        case SD_PRESENT:
+            display.draw_bmp(sd_bitmap, sd_width, sd_height, x, y);
+            break;
+
+        case SD_WRITING:
+            display.draw_bmp(sd_wr_bitmap, sd_wr_width, sd_wr_height, x, y);
+            break;
+    }
 }

@@ -35,27 +35,23 @@
 #include "rtc.h"
 #include "hw_def.h"
 
-#define DISPLAY_I2C_ADDR _u(0x3C)
-#define DISPLAY_WIDTH _u(128)
-#define DISPLAY_HEIGHT _u(64)
 
 void core1_entry();
 
 uint32_t real_baudrate = 0;
 uint8_t response_code = 0;
+uint8_t vesc_connected = 0;
 
 uint8_t get_values_response[100];
 
-mc_values rt_data;
 float adc_v1, adc_v2;
-float adc_decoded1, adc_decoded2;
 
 uint8_t pb_left_state, pb_left_prev_state;
 uint8_t pb_right_state, pb_right_prev_state;
 
 auto_init_mutex(float_mutex);
 
-pico_oled display(OLED_SSD1309, DISPLAY_I2C_ADDR, DISPLAY_WIDTH, DISPLAY_HEIGHT, /*reset_gpio=*/ 15); 
+pico_oled display(OLED_SSD1309, /*i2c_address=*/ 0x3C, /*screen_width=*/ 128, /*screen_height=*/ 64, /*reset_gpio=*/ 15); 
 
 Debounce debouncer;
 
@@ -84,13 +80,11 @@ int main()
     gpio_pull_up(PICO_DEFAULT_I2C_SCL_PIN);
 
     // Instantiate debouncer and configure GPIO
-
     // gpio_pull_up(PB_LEFT_GPIO);
     // gpio_pull_up(PB_RIGHT_GPIO);
 
     debouncer.debounce_gpio(PB_LEFT_GPIO);
     debouncer.set_debounce_time(PB_LEFT_GPIO, 20.0);    // 20ms debounce time
-
     debouncer.debounce_gpio(PB_RIGHT_GPIO);
     debouncer.set_debounce_time(PB_RIGHT_GPIO, 20.0);
 
@@ -115,18 +109,18 @@ int main()
     // display.print_num("%d kHz\n", f_clk_sys);
     // display.print("Baudrate: ");
     // display.print_num("%d Bps\n", real_baudrate);
-    display.print("PRESS ANY BUTTON TO TEST SD\n");
-    display.render();
+    // display.print("PRESS ANY BUTTON TO TEST SD\n");
+    // display.render();
 
-    while(!debouncer.read(PB_LEFT_GPIO) && !debouncer.read(PB_RIGHT_GPIO));
+    // while(!debouncer.read(PB_LEFT_GPIO) && !debouncer.read(PB_RIGHT_GPIO));
 
-    gpio_put(DEBUG_GPIO, 0);
-    uint8_t result = init_filesystem();
-    gpio_put(DEBUG_GPIO, 1);
+    // gpio_put(DEBUG_GPIO, 0);
+    // uint8_t result = init_filesystem();
+    // gpio_put(DEBUG_GPIO, 1);
 
-    display.print_num("INIT DONE. CODE: %d", result);
-    display.render();
-    for(;;);
+    // display.print_num("INIT DONE. CODE: %d", result);
+    // display.render();
+    // for(;;);
 
 
     sleep_ms(2000);    
@@ -144,23 +138,24 @@ int main()
         mutex_enter_blocking(&float_mutex);
 
 
-        // display.print_num(" VIN: %.1fV\n", rt_data.v_in);
-        // display.print_num("TFET: %.1fC\n", rt_data.temp_mos);
-        // display.print_num("TMOT: %.1fC\n", rt_data.temp_motor);        
-        // display.print_num("ERPM: %d\n", rt_data.rpm);  
+        // display.print_num(" VIN: %.1fV\n", data_pt.v_in);
+        // display.print_num("TFET: %.1fC\n", data_pt.temp_mos);
+        // display.print_num("TMOT: %.1fC\n", data_pt.temp_motor);        
+        // display.print_num("ERPM: %d\n", data_pt.rpm);  
         //display.print_num("ADC1_RAW: %.1fV\n", adc_v1);
-        //display.print_num("ADC1_DEC: %.3f\n", adc_decoded1);
+        //display.print_num("ADC1_DEC: %.3f\n", data_pt.adc1_decoded);
         //display.print_num("ADC2_RAW: %.1fV\n", adc_v2);
-        //display.print_num("ADC2_DEC: %.3f\n", adc_decoded2);
+        //display.print_num("ADC2_DEC: %.3f\n", data_pt.adc2_decoded);
 
-        display.draw_vbar(adc_decoded1*100, 4, 20, 8, 60);
+        display.draw_vbar(data_pt.adc1_decoded*100, 4, 20, 8, 60);
 
-        display.draw_hbar(adc_decoded1*100, 1, 20, 20, 60, 24);
-        display.draw_hbar(adc_decoded1*100, 0, 70, 20, 110, 24);        
+        display.draw_hbar(data_pt.adc1_decoded*100, 1, 20, 20, 60, 24);
+        display.draw_hbar(data_pt.adc1_decoded*100, 0, 70, 20, 110, 24);        
 
         display.print_num("BRIGHTNESS: %d\n", nv_settings.data.disp_brightness);
         display.print_num("FLASH PG=%d", nv_settings.page_id);
-        display.print_num("    BLOCK=%d", nv_settings.block_id);
+        display.print_num("    BLOCK=%d\n\r", nv_settings.block_id);
+        display.print(vesc_connected ? "VESC CONNECTED" : "VESC NOT CONNECTED");
 
         // char hex_str[10];
         // uint8_t cols = 0;
@@ -212,6 +207,9 @@ int main()
         pb_left_prev_state = pb_left_state;
         pb_right_prev_state = pb_right_state;
 
+
+        draw_SD_status(118,0);
+
         display.render();
 
     }
@@ -235,14 +233,12 @@ uint8_t receive_packet(PACKET_STATE_t *rx_packet)
             packet_process_byte(uart_getc(uart0), rx_packet);
         }
 
-        response_code = 1;
+        return 1;
     }
     else
     {
-        response_code = 0;
+        return 0;
     }
-
-    return response_code;
 }
 
 void process_data(uint8_t *data, size_t len);
@@ -280,7 +276,7 @@ void core1_entry()
         mutex_enter_blocking(&flash_lock);  // Don't allow flash erase/write while running core1 code
 
         sleep_until(next_sample);
-        next_sample = delayed_by_ms(next_sample, 1000 / log_sample_rate);
+        next_sample = delayed_by_ms(next_sample, 1000 / LOG_SAMPLE_RATE);
 
         // Blink LED to show that communication is happening
         // gpio_put(LED_PIN, 1);
@@ -307,7 +303,7 @@ void core1_entry()
 
 
         // Wait for the response packet and process it
-        receive_packet(&vesc_comm);
+        vesc_connected = receive_packet(&vesc_comm);
 
         
         // Prepare COMM_GET_DECODED_ADC packet
@@ -323,7 +319,41 @@ void core1_entry()
         packet_reset(&vesc_comm);    
 
         // Wait for the response packet and process it
-        receive_packet(&vesc_comm);        
+        receive_packet(&vesc_comm);      
+
+
+        ///////////// Logging /////////////
+
+        FRESULT result;
+
+        // If SS == 1 an SD card is connected
+        if (sd_status == SD_NOT_PRESENT)    // && gpio_get(SD_SS_GPIO) == 1)
+        {
+            DBG_PRINT("\033[2J\033[H" "FILESYSTEM INIT\n");
+            gpio_put(DEBUG_GPIO, 0);
+            result = init_filesystem();
+            gpio_put(DEBUG_GPIO, 1);
+
+            DBG_PRINT("init_filesystem() returned with %d: %s\n", result, FRESULT_str(result));
+            sleep_ms(1);
+
+            gpio_put(DEBUG_GPIO, 0);
+            result = create_log_file();
+            gpio_put(DEBUG_GPIO, 1);        
+            
+            DBG_PRINT("create_log_file() returned with %d: %s\n", result, FRESULT_str(result));
+            sleep_ms(1);
+
+        }
+        else if(sd_status == SD_PRESENT && vesc_connected)
+        {
+            gpio_put(DEBUG_GPIO, 0);
+            result = append_data_pt();
+            gpio_put(DEBUG_GPIO, 1);          
+
+            DBG_PRINT("append_data_pt() returned with %d: %s\n", result, FRESULT_str(result));            
+        }
+
 
         mutex_exit(&flash_lock);    // Release lock
     }
@@ -349,32 +379,34 @@ void process_data(uint8_t *data, size_t len)
 
             //memcpy(get_values_response, data+5, len-5);
 
-            // Unpack data from VESC response
-            rt_data.temp_mos = buffer_get_float16(data, 1e1, &idx);
-            rt_data.temp_motor = buffer_get_float16(data, 1e1, &idx);
-            rt_data.current_motor = buffer_get_float32(data, 1e2, &idx);
-            rt_data.current_in = buffer_get_float32(data, 1e2, &idx);
-            rt_data.id = buffer_get_float32(data, 1e2, &idx);
-            rt_data.iq = buffer_get_float32(data, 1e2, &idx);
-            rt_data.duty_now = buffer_get_float16(data, 1e3, &idx);
-            rt_data.rpm = buffer_get_float32(data, 1e0, &idx);
-            rt_data.v_in = buffer_get_float16(data, 1e1, &idx);
-            rt_data.amp_hours = buffer_get_float32(data, 1e4, &idx);
-            rt_data.amp_hours_charged = buffer_get_float32(data, 1e4, &idx);
-            rt_data.watt_hours = buffer_get_float32(data, 1e4, &idx);
-            rt_data.watt_hours_charged = buffer_get_float32(data, 1e4, &idx);
-            rt_data.tachometer = buffer_get_int32(data, &idx);
-            rt_data.tachometer_abs = buffer_get_int32(data, &idx);
-            rt_data.fault_code = data[idx++];
-            rt_data.position = buffer_get_float32(data, 1e6, &idx);
-            rt_data.vesc_id = data[idx++];
-            rt_data.temp_mos_1 = buffer_get_float16(data, 1e1, &idx);
-            rt_data.temp_mos_2 = buffer_get_float16(data, 1e1, &idx);
-            rt_data.temp_mos_3 = buffer_get_float16(data, 1e1, &idx);
-            rt_data.vd = buffer_get_float32(data, 1e3, &idx);
-            rt_data.vq = buffer_get_float32(data, 1e3, &idx);
+            data_pt.ms_today = time_us_64() / 1000;
 
-            //last byte is int8 status, but rt_data struct has no place for it
+            // Unpack data from VESC response
+            data_pt.temp_mos = buffer_get_float16(data, 1e1, &idx);
+            data_pt.temp_motor = buffer_get_float16(data, 1e1, &idx);
+            data_pt.current_motor = buffer_get_float32(data, 1e2, &idx);
+            data_pt.current_in = buffer_get_float32(data, 1e2, &idx);
+            data_pt.id = buffer_get_float32(data, 1e2, &idx);
+            data_pt.iq = buffer_get_float32(data, 1e2, &idx);
+            data_pt.duty_now = buffer_get_float16(data, 1e3, &idx);
+            data_pt.rpm = buffer_get_float32(data, 1e0, &idx);
+            data_pt.v_in = buffer_get_float16(data, 1e1, &idx);
+            data_pt.amp_hours = buffer_get_float32(data, 1e4, &idx);
+            data_pt.amp_hours_charged = buffer_get_float32(data, 1e4, &idx);
+            data_pt.watt_hours = buffer_get_float32(data, 1e4, &idx);
+            data_pt.watt_hours_charged = buffer_get_float32(data, 1e4, &idx);
+            data_pt.tachometer = buffer_get_int32(data, &idx);
+            data_pt.tachometer_abs = buffer_get_int32(data, &idx);
+            data_pt.fault_code = (mc_fault_code)data[idx++];
+            data_pt.position = buffer_get_float32(data, 1e6, &idx);
+            data_pt.vesc_id = data[idx++];
+            data_pt.temp_mos_1 = buffer_get_float16(data, 1e1, &idx);
+            data_pt.temp_mos_2 = buffer_get_float16(data, 1e1, &idx);
+            data_pt.temp_mos_3 = buffer_get_float16(data, 1e1, &idx);
+            data_pt.vd = buffer_get_float32(data, 1e3, &idx);
+            data_pt.vq = buffer_get_float32(data, 1e3, &idx);
+
+            //last byte is int8 status, but data_pt struct has no place for it
 
             mutex_exit(&float_mutex);
             break;
@@ -382,9 +414,9 @@ void process_data(uint8_t *data, size_t len)
         case COMM_GET_DECODED_ADC:
 
             mutex_enter_blocking(&float_mutex);
-            adc_decoded1 = buffer_get_float32(data, 1e6, &idx);
+            data_pt.adc1_decoded = buffer_get_float32(data, 1e6, &idx);
             adc_v1 = buffer_get_float32(data, 1e6, &idx);
-            adc_decoded2 = buffer_get_float32(data, 1e6, &idx);
+            data_pt.adc2_decoded = buffer_get_float32(data, 1e6, &idx);
             adc_v2 = buffer_get_float32(data, 1e6, &idx);
             mutex_exit(&float_mutex);
 
