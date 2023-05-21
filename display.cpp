@@ -15,8 +15,6 @@
 
 #include "pico-oled/pico-oled.hpp"
 #include "pico-oled/gfx_font.h"
-#include "pico-oled/font/press_start_2p.h"
-#include "pico-oled/font/too_simple.h"
 #include "nv_flash.hpp"
 #include "log.hpp"
 
@@ -35,6 +33,12 @@
 #include "rtc.h"
 #include "hw_def.h"
 
+#include "pico-oled/font/press_start_2p.h"
+#include "pico-oled/font/too_simple.h"
+
+// oled defines
+#define OLED_HEIGHT 64
+#define OLED_WIDTH 128
 
 void core1_entry();
 
@@ -97,14 +101,51 @@ int main()
     display.set_font(too_simple);
     //display.set_font(press_start_2p);
 
-    // Print out some system information
-    uint32_t f_clk_sys = frequency_count_khz(CLOCKS_FC0_SRC_VALUE_CLK_SYS);
+    // // Print out some system information
+    // uint32_t f_clk_sys = frequency_count_khz(CLOCKS_FC0_SRC_VALUE_CLK_SYS);
 
 
+    // for(;;)
+    // {
+    //     display.fill(0x1);    // 1/8th lit, 12.5%
+    //     display.render();        
+    //     sleep_ms(5000);
 
-    // Show a page of debug values
-    display.set_cursor(0,0);
-    display.print("Pico SVD\n");
+    //     display.fill(0x9);    // 1/4th lit, 25%
+    //     display.render();        
+    //     sleep_ms(5000);
+
+    //     display.fill(0xAA);    // 1/2th lit, 50%
+    //     display.render();        
+    //     sleep_ms(5000);
+
+    //     display.fill(0xFF);    // all lit, 100%
+    //     display.render();        
+    //     sleep_ms(5000);        
+    // }
+
+    // // Show a page of debug values
+    // display.set_cursor(0,0);
+    // display.print("Pico SVD\n\n");
+
+    // analog_gauge speedo(&display);
+    // speedo.set_position(OLED_HEIGHT, 120);
+    // speedo.set_scale(0, 100, 245, 295);
+    // speedo.set_markers(5, 110, 16, 1);
+    // speedo.set_value(25);
+    // speedo.draw();
+
+    // analog_gauge dial(&display);
+    // dial.set_position(117, 53);
+    // dial.set_scale(0, 60, 90, 450);
+    // dial.set_markers(6, 10, 2, 1);
+    // dial.set_value(10);
+    // dial.draw();
+
+
+    // display.render();
+
+    // for(;;);
     // display.print("CLK_SYS:  ");
     // display.print_num("%d kHz\n", f_clk_sys);
     // display.print("Baudrate: ");
@@ -114,19 +155,129 @@ int main()
 
     // while(!debouncer.read(PB_LEFT_GPIO) && !debouncer.read(PB_RIGHT_GPIO));
 
-    // gpio_put(DEBUG_GPIO, 0);
-    // uint8_t result = init_filesystem();
-    // gpio_put(DEBUG_GPIO, 1);
-
-    // display.print_num("INIT DONE. CODE: %d", result);
-    // display.render();
-    // for(;;);
-
-
     sleep_ms(2000);    
 
     // Start core 1
     multicore_launch_core1(core1_entry);
+
+
+    // Display Setup
+
+    // Gauges setup
+    #define MAX_KPH 60
+
+    analog_gauge speed_gauge(&display);
+    speed_gauge.set_position(OLED_WIDTH/2 - 1, 120);
+    speed_gauge.set_scale(0,MAX_KPH, 250, 290);
+    speed_gauge.set_markers(6, 88, 12, 1);
+
+    char kph_str[20];
+    uint8_t kph_txt_x, kph_txt_y, b_soc;
+
+    #define ROLLING_AVG_RATIO 0.3
+
+    float b_cur_avg = 0;
+    float b_volts_avg = 0;
+    float m_erpm_avg = 0;
+    float kph = 0;
+
+
+    while(true)
+    {
+        display.fill(0);
+
+        mutex_enter_blocking(&float_mutex);
+
+        // Update rolling averages
+        b_cur_avg = (1 - ROLLING_AVG_RATIO) * b_cur_avg + ROLLING_AVG_RATIO * abs(data_pt.current_in);
+        b_volts_avg = (1 - ROLLING_AVG_RATIO) * b_volts_avg + ROLLING_AVG_RATIO * data_pt.v_in;
+        m_erpm_avg = (1 - ROLLING_AVG_RATIO) * m_erpm_avg + ROLLING_AVG_RATIO * abs(data_pt.rpm);
+
+        // Display battery voltage visually and numerically
+        // TODO: Get max Batt V from vesc for auto ranging soc value
+        // for now hardcode 13S battery Full =54.6V empty = 39V (3.0/cell) (delta V = 15.6)
+        b_soc = MIN(((b_volts_avg - 39.0) * 100 / 15.6), 100); // Get scale from min to max batt V
+        #define BATT_TERMINAL_TOP_LEFT_X 4
+        #define BATT_TERMINAL_TOP_LEFT_Y 15
+        #define BATT_TERMINAL_WIDTH 8
+        #define BATT_TERMINAL_HEIGHT 3
+
+        display.draw_vbar(b_soc, 0, 18, 15, OLED_HEIGHT - 1); // Battery icon outline
+        display.fill_rect(0, BATT_TERMINAL_TOP_LEFT_X, BATT_TERMINAL_TOP_LEFT_Y, BATT_TERMINAL_TOP_LEFT_X + BATT_TERMINAL_WIDTH, BATT_TERMINAL_TOP_LEFT_Y + BATT_TERMINAL_HEIGHT); // Draw block to represent battery terminal
+
+        // Batt Voltage and Current text
+        display.set_cursor(2, 0);
+        display.print_num("%.1fV", b_volts_avg);
+        display.set_cursor(2,6);
+        display.print_num("%.0fA", b_cur_avg);
+
+        // Display Speed on gauge
+        // KPH = ERPM / Pole Pairs * wheel diameter(mm)/1000000 * PI
+        // TODO: change from old gauge to new using speed instead of battery current
+        
+        kph = float(m_erpm_avg/23 * 330/1000000 * 3.1415);
+        speed_gauge.set_value(kph);
+        speed_gauge.draw();
+        sprintf(kph_str, "%.1f KPH", kph);
+        display.get_str_dimensions(kph_str, &kph_txt_x, &kph_txt_y);
+
+
+        // Blank out underneath text
+        //display.fill_rect(1, OLED_HEIGHT - 1 - (kph_txt_x/2), 32, OLED_HEIGHT - 1 + (kph_txt_x/2), 32 + 2*kph_txt_y);
+
+        // Display Speed text
+        display.set_cursor(OLED_HEIGHT - 1 - (kph_txt_x/2), 16);
+        display.print(kph_str);
+
+        // Display power
+        sprintf(kph_str, "%.0fW", b_cur_avg * b_volts_avg);      
+        display.set_cursor(OLED_HEIGHT - 1 - (kph_txt_x/2), 24);       
+        display.print(kph_str);
+
+
+        // Display watt-hours charged numerically
+        // TODO Watt hours used instead
+        // display.fill_rect(1, 18, 52, 117, OLED_HEIGHT - 1);  // Blank out area where text will draw
+        // display.set_cursor(19, 54);
+        // display.print_num("WATT-HRS GENERATED: %.1f", data_pt.watt_hours_charged);
+
+        // // TODO: Display throttle intensity visually (ADC1) next to regen (ADC2)
+        #define THROTTLE_BAR_WIDTH 5
+        #define THROTTLE_BAR_HEIGHT 20
+
+
+        display.set_cursor(OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH*2, 10);
+        display.print("T\nH\nR\nO\nT");
+
+        display.set_cursor(OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH + 1, 10);
+        display.print("R\nE\nG\nE\nN");
+
+        // Draw Throttle bar
+        display.draw_vbar(data_pt.adc1_decoded*100, OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH*2, OLED_HEIGHT - 1 - THROTTLE_BAR_HEIGHT, OLED_WIDTH - 1-THROTTLE_BAR_WIDTH, OLED_HEIGHT - 1);
+        // Draw Regen Bar
+        display.draw_vbar(data_pt.adc1_decoded*100, OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH, OLED_HEIGHT - 1 - THROTTLE_BAR_HEIGHT, OLED_WIDTH - 1, OLED_HEIGHT - 1);
+        
+
+        // TODO: Display FET/MOTOR temperature and bar graph and change max temp to non hardcode
+        #define TEMP_BAR_X 70
+        #define TEMP_BAR_HEIGHT 5
+        #define FET_TEMP_Y 0
+        #define MOTOR_TEMP_Y (FET_TEMP_Y + 5 + 1)
+    
+        display.set_cursor(24, 0);
+        display.print_num("FETS: %2.0fC", data_pt.temp_mos);
+        display.draw_hbar(data_pt.temp_mos/110.0 * 100.0,0, TEMP_BAR_X,0,110,TEMP_BAR_HEIGHT);
+        
+
+        display.set_cursor(24, MOTOR_TEMP_Y);
+        display.print_num("MOT: %2.0fC", data_pt.temp_motor);
+        display.draw_hbar(data_pt.temp_motor/110.0 * 100.0,0, TEMP_BAR_X,MOTOR_TEMP_Y,110,MOTOR_TEMP_Y + TEMP_BAR_HEIGHT);
+
+        
+
+        mutex_exit(&float_mutex);
+        display.render();
+    }
 
     while(true)
     {
@@ -269,6 +420,16 @@ void core1_entry()
     absolute_time_t next_sample, sample_time;
 
     /* Handle any config reads first */
+    // Build Packet for config reads
+    /* TODO: Get 
+        wheel diameter
+        motor poles
+        battery voltage
+        battery AH
+        gear ratio
+        fet temp limit start/end
+        motor temp limit start/end
+    */
 
     next_sample = get_absolute_time();
     while (true)
