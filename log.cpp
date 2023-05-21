@@ -32,7 +32,7 @@ char log_filename[30] = "";
 log_data_t data_pt;
 
 
-uint8_t init_filesystem()
+FRESULT init_filesystem()
 {
     sd_card_t *pSD = sd_get_by_num(0);
 
@@ -230,7 +230,7 @@ uint8_t init_filesystem()
 
 /// @brief Create next log file and set the CSV columns
 /// @return FRESULT of file operations
-uint8_t create_log_file()
+FRESULT create_log_file()
 {
     sd_card_t *pSD = sd_get_by_num(0);
     FIL log_fil;
@@ -276,7 +276,7 @@ uint8_t create_log_file()
 
 /// @brief 
 /// @return 
-uint8_t append_data_pt()
+FRESULT append_data_pt()
 {
     sd_card_t *pSD = sd_get_by_num(0);
     FIL log_fil;

@@ -15,8 +15,6 @@
 
 #include "pico-oled/pico-oled.hpp"
 #include "pico-oled/gfx_font.h"
-#include "pico-oled/font/press_start_2p.h"
-#include "pico-oled/font/too_simple.h"
 #include "nv_flash.hpp"
 #include "log.hpp"
 
@@ -35,6 +33,8 @@
 #include "rtc.h"
 #include "hw_def.h"
 
+#include "pico-oled/font/press_start_2p.h"
+#include "pico-oled/font/too_simple.h"
 
 void core1_entry();
 
@@ -97,14 +97,51 @@ int main()
     display.set_font(too_simple);
     //display.set_font(press_start_2p);
 
-    // Print out some system information
-    uint32_t f_clk_sys = frequency_count_khz(CLOCKS_FC0_SRC_VALUE_CLK_SYS);
+    // // Print out some system information
+    // uint32_t f_clk_sys = frequency_count_khz(CLOCKS_FC0_SRC_VALUE_CLK_SYS);
 
 
+    // for(;;)
+    // {
+    //     display.fill(0x1);    // 1/8th lit, 12.5%
+    //     display.render();        
+    //     sleep_ms(5000);
 
-    // Show a page of debug values
-    display.set_cursor(0,0);
-    display.print("Pico SVD\n");
+    //     display.fill(0x9);    // 1/4th lit, 25%
+    //     display.render();        
+    //     sleep_ms(5000);
+
+    //     display.fill(0xAA);    // 1/2th lit, 50%
+    //     display.render();        
+    //     sleep_ms(5000);
+
+    //     display.fill(0xFF);    // all lit, 100%
+    //     display.render();        
+    //     sleep_ms(5000);        
+    // }
+
+    // // Show a page of debug values
+    // display.set_cursor(0,0);
+    // display.print("Pico SVD\n\n");
+
+    // analog_gauge speedo(&display);
+    // speedo.set_position(63, 120);
+    // speedo.set_scale(0, 100, 245, 295);
+    // speedo.set_markers(5, 110, 16, 1);
+    // speedo.set_value(25);
+    // speedo.draw();
+
+    // analog_gauge dial(&display);
+    // dial.set_position(117, 53);
+    // dial.set_scale(0, 60, 90, 450);
+    // dial.set_markers(6, 10, 2, 1);
+    // dial.set_value(10);
+    // dial.draw();
+
+
+    // display.render();
+
+    // for(;;);
     // display.print("CLK_SYS:  ");
     // display.print_num("%d kHz\n", f_clk_sys);
     // display.print("Baudrate: ");
@@ -114,19 +151,91 @@ int main()
 
     // while(!debouncer.read(PB_LEFT_GPIO) && !debouncer.read(PB_RIGHT_GPIO));
 
-    // gpio_put(DEBUG_GPIO, 0);
-    // uint8_t result = init_filesystem();
-    // gpio_put(DEBUG_GPIO, 1);
-
-    // display.print_num("INIT DONE. CODE: %d", result);
-    // display.render();
-    // for(;;);
-
-
     sleep_ms(2000);    
 
     // Start core 1
     multicore_launch_core1(core1_entry);
+
+
+    // Exercise bike display page
+    analog_gauge batt_current(&display);
+    batt_current.set_position(63, 120);
+    batt_current.set_scale(0, 10, 250, 290);
+    batt_current.set_markers(5, 106, 12, 1);
+
+    char b_cur_str[20];
+    uint8_t b_cur_txt_x, b_cur_txt_y, b_soc;
+
+    #define ROLLING_AVG_RATIO 0.3
+
+    float b_cur_avg = 0;
+    float b_volts_avg = 0;
+    float m_erpm_avg = 0;
+
+    while(true)
+    {
+        display.fill(0);
+
+        mutex_enter_blocking(&float_mutex);
+
+        // Update rolling averages
+        b_cur_avg = (1 - ROLLING_AVG_RATIO) * b_cur_avg + ROLLING_AVG_RATIO * abs(data_pt.current_in);
+        b_volts_avg = (1 - ROLLING_AVG_RATIO) * b_volts_avg + ROLLING_AVG_RATIO * data_pt.v_in;
+        m_erpm_avg = (1 - ROLLING_AVG_RATIO) * m_erpm_avg + ROLLING_AVG_RATIO * abs(data_pt.rpm);
+
+        // Display battery voltage visually and numerically
+        // 12V SLA, 0% SOC = 9V, 100% SOC = 12.6. 12.6 - 9.0 = 3.6V range
+        b_soc = MIN(((b_volts_avg - 9.0) * 100 / 3.6), 100);
+        display.draw_vbar(b_soc, 0, 12, 15, 63);
+        display.fill_rect(0, 4, 9, 11, 11); // Draw block to represent battery terminal
+
+        display.set_cursor(2, 0);
+        display.print_num("%.1fV", b_volts_avg);
+
+        // Display battery current visually and numerically
+        batt_current.set_value(b_cur_avg);
+        batt_current.draw();
+        sprintf(b_cur_str, "%.1fA", b_cur_avg);
+        display.get_str_dimensions(b_cur_str, &b_cur_txt_x, &b_cur_txt_y);
+
+
+        // Blank out underneath text
+        display.fill_rect(1, 63 - (b_cur_txt_x/2), 32, 63 + (b_cur_txt_x/2), 32 + 2*b_cur_txt_y);
+        display.set_cursor(63 - (b_cur_txt_x/2), 32);
+        display.print(b_cur_str);        
+
+        // Display human input power
+        sprintf(b_cur_str, "%.1fW", b_cur_avg * b_volts_avg);      
+        display.set_cursor(63 - (b_cur_txt_x/2), 40);       
+        display.print(b_cur_str);             
+
+
+        // Display watt-hours charged numerically
+        display.fill_rect(1, 18, 52, 117, 63);  // Blank out area where text will draw
+        display.set_cursor(19, 54);
+        display.print_num("WATT-HRS GENERATED: %.1f", data_pt.watt_hours_charged);
+
+        // Display regen intensity visually (ADC2)
+        display.set_cursor(123, 10);
+        display.print("R\nE\nG\nE\nN");
+        display.draw_vbar(data_pt.adc2_decoded*100, 121, 42, 127, 63);
+
+
+        // Display FET temperature
+        display.set_cursor(24, 0);
+        display.print_num("FETS: %2.0fC", data_pt.temp_mos);
+
+        // Display RPM
+        // Convert to pedal cadence 
+        // SK3 6374 has 14 pole pairs (unconfirmed)
+        // RPM = ERPM / Pole Pairs
+        // Motor to pedal reduction ratio is 21.4452:1
+        display.set_cursor(64, 0);
+        display.print_num("PEDALS: %.0fRPM", float(m_erpm_avg / (21.4452 * 14)));
+
+        mutex_exit(&float_mutex);
+        display.render();
+    }
 
     while(true)
     {

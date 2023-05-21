@@ -3,6 +3,7 @@
 #define LOG_H
 
 #include "datatypes.h"
+#include "ff.h"
 
 //#define DBG_PRINT (fmt, args...)
 #define DBG_PRINT printf
@@ -56,9 +57,9 @@ typedef struct
 extern uint8_t sd_status;
 extern log_data_t data_pt;
 
-uint8_t init_filesystem();
-uint8_t create_log_file();
-uint8_t append_data_pt();
+FRESULT init_filesystem();
+FRESULT create_log_file();
+FRESULT append_data_pt();
 void draw_SD_status(uint8_t x, uint8_t y);
 
 #endif
