@@ -36,9 +36,14 @@
 #include "pico-oled/font/press_start_2p.h"
 #include "pico-oled/font/too_simple.h"
 
+// Comment out debug when not using
+#define DEBUG
+
 // oled defines
 #define OLED_HEIGHT 64
 #define OLED_WIDTH 128
+
+#define BOOTLOADER_BUTTON_TIME 0.5     // time in seconds for buttons to be pressed before entering bootloader mode
 
 void core1_entry();
 
@@ -84,8 +89,8 @@ int main()
     gpio_pull_up(PICO_DEFAULT_I2C_SCL_PIN);
 
     // Instantiate debouncer and configure GPIO
-    // gpio_pull_up(PB_LEFT_GPIO);
-    // gpio_pull_up(PB_RIGHT_GPIO);
+    gpio_pull_up(PB_LEFT_GPIO);
+    gpio_pull_up(PB_RIGHT_GPIO);
 
     debouncer.debounce_gpio(PB_LEFT_GPIO);
     debouncer.set_debounce_time(PB_LEFT_GPIO, 20.0);    // 20ms debounce time
@@ -165,14 +170,16 @@ int main()
 
     // Gauges setup
     #define MAX_KPH 60
+    #define TEXT_UNDER_SPEEDO_Y_START 32
+
 
     analog_gauge speed_gauge(&display);
     speed_gauge.set_position(OLED_WIDTH/2 - 1, 120);
     speed_gauge.set_scale(0,MAX_KPH, 250, 290);
-    speed_gauge.set_markers(6, 88, 12, 1);
+    speed_gauge.set_markers(6, 106, 12, 1);
 
-    char kph_str[20];
-    uint8_t kph_txt_x, kph_txt_y, b_soc;
+    char temp_str[20];
+    uint8_t temp_str_x, temp_str_y, b_soc;
 
     #define ROLLING_AVG_RATIO 0.3
 
@@ -180,19 +187,65 @@ int main()
     float b_volts_avg = 0;
     float m_erpm_avg = 0;
     float kph = 0;
+    
+    absolute_time_t timer_ms = get_absolute_time();
+
 
 
     while(true)
     {
+        // TODO: Button reads. 
+        // Go into bootloader when both buttons pressed for 3 seconds
+        // check if both buttons are pressed. start timer 
+        // if button has been pressed again after set time, activate bootloader
+
+        pb_right_prev_state = pb_right_state;
+        pb_left_prev_state = pb_left_state;
+
+        pb_right_state = debouncer.read(PB_RIGHT_GPIO);
+        pb_left_state = debouncer.read(PB_LEFT_GPIO);
+        
+    
+        // if either button is not pressed reset current time
+        if (pb_left_state || pb_right_state)
+        {
+            //store current time
+            timer_ms = get_absolute_time();
+        }
+
+        // if current time - timer_ms > 3 seconds, enter bootloader
+        if (absolute_time_diff_us(timer_ms,get_absolute_time()) > BOOTLOADER_BUTTON_TIME * 1E06)
+        {
+            //ENTER BOOTLOADER
+            // TODO: display entering bootloader.
+            display.fill(0);
+            display.set_cursor(0,OLED_HEIGHT/2);
+            display.print("----ENTERING BOOTLOADER----");
+            display.render();
+            sleep_ms(100);
+            reset_usb_boot(0,0);
+        }
+
+
+
+        // start display stuff
         display.fill(0);
 
         mutex_enter_blocking(&float_mutex);
 
         // Update rolling averages
-        b_cur_avg = (1 - ROLLING_AVG_RATIO) * b_cur_avg + ROLLING_AVG_RATIO * abs(data_pt.current_in);
+        b_cur_avg = (1 - ROLLING_AVG_RATIO) * b_cur_avg + ROLLING_AVG_RATIO * data_pt.current_in;
         b_volts_avg = (1 - ROLLING_AVG_RATIO) * b_volts_avg + ROLLING_AVG_RATIO * data_pt.v_in;
-        m_erpm_avg = (1 - ROLLING_AVG_RATIO) * m_erpm_avg + ROLLING_AVG_RATIO * abs(data_pt.rpm);
+        #ifdef DEBUG
 
+        // DEBUG: use buttons to change speed
+        if(pb_left_state == 0)
+            m_erpm_avg = (1 - ROLLING_AVG_RATIO) * m_erpm_avg + ROLLING_AVG_RATIO * (m_erpm_avg - 60.0);   
+        if(pb_right_state == 0)
+            m_erpm_avg = (1 - ROLLING_AVG_RATIO) * m_erpm_avg + ROLLING_AVG_RATIO * (m_erpm_avg + 60.0);
+        #else
+        m_erpm_avg = (1 - ROLLING_AVG_RATIO) * m_erpm_avg + ROLLING_AVG_RATIO * abs(data_pt.rpm);
+        #endif
         // Display battery voltage visually and numerically
         // TODO: Get max Batt V from vesc for auto ranging soc value
         // for now hardcode 13S battery Full =54.6V empty = 39V (3.0/cell) (delta V = 15.6)
@@ -208,31 +261,32 @@ int main()
         // Batt Voltage and Current text
         display.set_cursor(2, 0);
         display.print_num("%.1fV", b_volts_avg);
-        display.set_cursor(2,6);
+        display.set_cursor(2,display.get_font_height());
         display.print_num("%.0fA", b_cur_avg);
 
         // Display Speed on gauge
-        // KPH = ERPM / Pole Pairs * wheel diameter(mm)/1000000 * PI
-        // TODO: change from old gauge to new using speed instead of battery current
+        // KPH = ERPM / Pole Pairs * wheel diameter(mm)/1000000 * PI * 60 min/hour
+        // 
         
-        kph = float(m_erpm_avg/23 * 330/1000000 * 3.1415);
+        kph = float(m_erpm_avg/23 * 660/1000000 * 3.1415 * 60);
         speed_gauge.set_value(kph);
         speed_gauge.draw();
-        sprintf(kph_str, "%.1f KPH", kph);
-        display.get_str_dimensions(kph_str, &kph_txt_x, &kph_txt_y);
+        sprintf(temp_str, "%.1f KPH", kph);
+        display.get_str_dimensions(temp_str, &temp_str_x, &temp_str_y);
 
 
-        // Blank out underneath text
-        //display.fill_rect(1, OLED_HEIGHT - 1 - (kph_txt_x/2), 32, OLED_HEIGHT - 1 + (kph_txt_x/2), 32 + 2*kph_txt_y);
+        // Blank out underneath text (1 pixel bigger than text box)
+        display.fill_rect(1, OLED_WIDTH/2 - 1 - (temp_str_x/2) - 1, TEXT_UNDER_SPEEDO_Y_START, OLED_WIDTH/2 - 1 + (temp_str_x/2), TEXT_UNDER_SPEEDO_Y_START + 2*temp_str_y+1);
 
         // Display Speed text
-        display.set_cursor(OLED_HEIGHT - 1 - (kph_txt_x/2), 16);
-        display.print(kph_str);
+        display.set_cursor(OLED_WIDTH/2 - 1 - (temp_str_x/2), TEXT_UNDER_SPEEDO_Y_START);
+        display.print(temp_str);
 
-        // Display power
-        sprintf(kph_str, "%.0fW", b_cur_avg * b_volts_avg);      
-        display.set_cursor(OLED_HEIGHT - 1 - (kph_txt_x/2), 24);       
-        display.print(kph_str);
+        // Display Power
+        sprintf(temp_str, "%.0fW", b_cur_avg * b_volts_avg);
+        display.get_str_dimensions(temp_str, &temp_str_x, &temp_str_y);      
+        display.set_cursor(OLED_WIDTH/2 - 1 - (temp_str_x/2), TEXT_UNDER_SPEEDO_Y_START + display.get_font_height() + 1);       
+        display.print(temp_str);
 
 
         // Display watt-hours charged numerically
@@ -255,7 +309,7 @@ int main()
         // Draw Throttle bar
         display.draw_vbar(data_pt.adc1_decoded*100, OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH*2, OLED_HEIGHT - 1 - THROTTLE_BAR_HEIGHT, OLED_WIDTH - 1-THROTTLE_BAR_WIDTH, OLED_HEIGHT - 1);
         // Draw Regen Bar
-        display.draw_vbar(data_pt.adc1_decoded*100, OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH, OLED_HEIGHT - 1 - THROTTLE_BAR_HEIGHT, OLED_WIDTH - 1, OLED_HEIGHT - 1);
+        display.draw_vbar(data_pt.adc2_decoded*100, OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH, OLED_HEIGHT - 1 - THROTTLE_BAR_HEIGHT, OLED_WIDTH - 1, OLED_HEIGHT - 1);
         
 
         // TODO: Display FET/MOTOR temperature and bar graph and change max temp to non hardcode
@@ -279,91 +333,91 @@ int main()
         display.render();
     }
 
-    while(true)
-    {
-        display.fill(0);
+    // while(true)
+    // {
+    //     display.fill(0);
 
-        display.set_cursor(0,0);
+    //     display.set_cursor(0,0);
 
         
-        mutex_enter_blocking(&float_mutex);
+    //     mutex_enter_blocking(&float_mutex);
 
 
-        // display.print_num(" VIN: %.1fV\n", data_pt.v_in);
-        // display.print_num("TFET: %.1fC\n", data_pt.temp_mos);
-        // display.print_num("TMOT: %.1fC\n", data_pt.temp_motor);        
-        // display.print_num("ERPM: %d\n", data_pt.rpm);  
-        //display.print_num("ADC1_RAW: %.1fV\n", adc_v1);
-        //display.print_num("ADC1_DEC: %.3f\n", data_pt.adc1_decoded);
-        //display.print_num("ADC2_RAW: %.1fV\n", adc_v2);
-        //display.print_num("ADC2_DEC: %.3f\n", data_pt.adc2_decoded);
+    //     // display.print_num(" VIN: %.1fV\n", data_pt.v_in);
+    //     // display.print_num("TFET: %.1fC\n", data_pt.temp_mos);
+    //     // display.print_num("TMOT: %.1fC\n", data_pt.temp_motor);        
+    //     // display.print_num("ERPM: %d\n", data_pt.rpm);  
+    //     //display.print_num("ADC1_RAW: %.1fV\n", adc_v1);
+    //     //display.print_num("ADC1_DEC: %.3f\n", data_pt.adc1_decoded);
+    //     //display.print_num("ADC2_RAW: %.1fV\n", adc_v2);
+    //     //display.print_num("ADC2_DEC: %.3f\n", data_pt.adc2_decoded);
 
-        display.draw_vbar(data_pt.adc1_decoded*100, 4, 20, 8, 60);
+    //     display.draw_vbar(data_pt.adc1_decoded*100, 4, 20, 8, 60);
 
-        display.draw_hbar(data_pt.adc1_decoded*100, 1, 20, 20, 60, 24);
-        display.draw_hbar(data_pt.adc1_decoded*100, 0, 70, 20, 110, 24);        
+    //     display.draw_hbar(data_pt.adc1_decoded*100, 1, 20, 20, 60, 24);
+    //     display.draw_hbar(data_pt.adc1_decoded*100, 0, 70, 20, 110, 24);        
 
-        display.print_num("BRIGHTNESS: %d\n", nv_settings.data.disp_brightness);
-        display.print_num("FLASH PG=%d", nv_settings.page_id);
-        display.print_num("    BLOCK=%d\n\r", nv_settings.block_id);
-        display.print(vesc_connected ? "VESC CONNECTED" : "VESC NOT CONNECTED");
+    //     display.print_num("BRIGHTNESS: %d\n", nv_settings.data.disp_brightness);
+    //     display.print_num("FLASH PG=%d", nv_settings.page_id);
+    //     display.print_num("    BLOCK=%d\n\r", nv_settings.block_id);
+    //     display.print(vesc_connected ? "VESC CONNECTED" : "VESC NOT CONNECTED");
 
-        // char hex_str[10];
-        // uint8_t cols = 0;
-        // for (uint8_t idx = 0; idx < 20; idx++)
-        // {
-        //     if (cols++ == 4)
-        //     {
-        //         cols = 0;
-        //         display.print("\n");
-        //     }
+    //     // char hex_str[10];
+    //     // uint8_t cols = 0;
+    //     // for (uint8_t idx = 0; idx < 20; idx++)
+    //     // {
+    //     //     if (cols++ == 4)
+    //     //     {
+    //     //         cols = 0;
+    //     //         display.print("\n");
+    //     //     }
 
-        //     sprintf(hex_str, "%.2X ", get_values_response[idx]);
-        //     display.print(hex_str);            
-        // }        
+    //     //     sprintf(hex_str, "%.2X ", get_values_response[idx]);
+    //     //     display.print(hex_str);            
+    //     // }        
 
-        mutex_exit(&float_mutex);
+    //     mutex_exit(&float_mutex);
 
-        // Process inputs
-        pb_left_state = debouncer.read(PB_LEFT_GPIO);
-        pb_right_state = debouncer.read(PB_RIGHT_GPIO);
+    //     // Process inputs
+    //     pb_left_state = debouncer.read(PB_LEFT_GPIO);
+    //     pb_right_state = debouncer.read(PB_RIGHT_GPIO);
 
-        // Draw the state of the buttons
-        if (pb_left_state)
-            display.fill_rect(0, 80, 30, 100, 50);
-        else
-            display.draw_box(80, 30, 100, 50);
+    //     // Draw the state of the buttons
+    //     if (pb_left_state)
+    //         display.fill_rect(0, 80, 30, 100, 50);
+    //     else
+    //         display.draw_box(80, 30, 100, 50);
 
-        if (pb_right_state)
-            display.fill_rect(0, 105, 30, 125, 50);
-        else
-            display.draw_box(105, 30, 125, 50);
+    //     if (pb_right_state)
+    //         display.fill_rect(0, 105, 30, 125, 50);
+    //     else
+    //         display.draw_box(105, 30, 125, 50);
 
-        // If left PB was just pressed
-        if (pb_left_state && !pb_left_prev_state)
-        {
-            nv_settings.data.disp_brightness -= 16;
-            display.set_brightness(nv_settings.data.disp_brightness);
-            nv_settings.store_data();
-        }
+    //     // If left PB was just pressed
+    //     if (pb_left_state && !pb_left_prev_state)
+    //     {
+    //         nv_settings.data.disp_brightness -= 16;
+    //         display.set_brightness(nv_settings.data.disp_brightness);
+    //         nv_settings.store_data();
+    //     }
 
-        // If right PB was just pressed
-        if (pb_right_state && !pb_right_prev_state)
-        {
-            nv_settings.data.disp_brightness += 16;
-            display.set_brightness(nv_settings.data.disp_brightness);       
-            nv_settings.store_data();                 
-        }
+    //     // If right PB was just pressed
+    //     if (pb_right_state && !pb_right_prev_state)
+    //     {
+    //         nv_settings.data.disp_brightness += 16;
+    //         display.set_brightness(nv_settings.data.disp_brightness);       
+    //         nv_settings.store_data();                 
+    //     }
 
-        pb_left_prev_state = pb_left_state;
-        pb_right_prev_state = pb_right_state;
+    //     pb_left_prev_state = pb_left_state;
+    //     pb_right_prev_state = pb_right_state;
 
 
-        draw_SD_status(118,0);
+    //     draw_SD_status(118,0);
 
-        display.render();
+    //     display.render();
 
-    }
+    // }
 }
 
 
