@@ -36,14 +36,24 @@
 #include "pico-oled/font/press_start_2p.h"
 #include "pico-oled/font/too_simple.h"
 
+/*  TODO: 
+ - add a function in pico-led library to blank out the area where text would be
+ - improve analog gauge to have adjustable needle len
+ - add a horizontal/vertical analog gauge 
+ - add bigger font for main data (speed,power)
+
+*/
+
 // Comment out debug when not using
-#define DEBUG
+//#define DEBUG
 
 // oled defines
 #define OLED_HEIGHT 64
 #define OLED_WIDTH 128
+#define OLED_FRAMERATE 60
 
 #define BOOTLOADER_BUTTON_TIME 0.5     // time in seconds for buttons to be pressed before entering bootloader mode
+#define DISPLAY_RESET_BUTTON_TIME 2
 
 void core1_entry();
 
@@ -81,8 +91,8 @@ int main()
     gpio_put(DEBUG_GPIO, 1);
 
     // Init i2c and configure it's GPIO pins
-    //uint32_t i2c_clk = i2c_init(i2c_default, 400 * 1000);
-    uint32_t i2c_clk = i2c_init(i2c_default, 1000 * 1000);  // 1120 kHz max
+    uint32_t i2c_clk = i2c_init(i2c_default, 400 * 1000);
+    //uint32_t i2c_clk = i2c_init(i2c_default, 1000 * 1000);  // 1120 kHz max (from testing on one display)
     gpio_set_function(PICO_DEFAULT_I2C_SDA_PIN, GPIO_FUNC_I2C);
     gpio_set_function(PICO_DEFAULT_I2C_SCL_PIN, GPIO_FUNC_I2C);
     gpio_pull_up(PICO_DEFAULT_I2C_SDA_PIN);
@@ -101,7 +111,9 @@ int main()
     pb_left_prev_state = pb_left_state = debouncer.read(PB_LEFT_GPIO);
     pb_right_prev_state = pb_right_state = debouncer.read(PB_RIGHT_GPIO);
     
+    // oled init
     display.oled_init();
+    display.set_brightness(nv_settings.data.disp_brightness);   // set brightness from saved flash settings
 
     display.set_font(too_simple);
     //display.set_font(press_start_2p);
@@ -187,13 +199,23 @@ int main()
     float b_volts_avg = 0;
     float m_erpm_avg = 0;
     float kph = 0;
+    float fps = 0;
     
     absolute_time_t timer_ms = get_absolute_time();
+    absolute_time_t next_frame_time = timer_ms;
+    absolute_time_t left_button_timer = timer_ms;
+    absolute_time_t next_fps_count = timer_ms;
+    
 
 
 
     while(true)
     {
+        // Limit framerate to OLED_FRAMERATE
+        sleep_until(next_frame_time);
+        next_frame_time = delayed_by_ms(next_frame_time, 1000 / OLED_FRAMERATE);
+
+
         // TODO: Button reads. 
         // Go into bootloader when both buttons pressed for 3 seconds
         // check if both buttons are pressed. start timer 
@@ -216,8 +238,7 @@ int main()
         // if current time - timer_ms > 3 seconds, enter bootloader
         if (absolute_time_diff_us(timer_ms,get_absolute_time()) > BOOTLOADER_BUTTON_TIME * 1E06)
         {
-            //ENTER BOOTLOADER
-            // TODO: display entering bootloader.
+            // ENTER BOOTLOADER
             display.fill(0);
             display.set_cursor(0,OLED_HEIGHT/2);
             display.print("----ENTERING BOOTLOADER----");
@@ -226,8 +247,33 @@ int main()
             reset_usb_boot(0,0);
         }
 
+        // If left button has been pressed for DISPLAY_RESET_BUTTON_TIME
+        if(absolute_time_diff_us(timer_ms,get_absolute_time()) > DISPLAY_RESET_BUTTON_TIME * 1E06)
+        {
+            // Reset display
+            left_button_timer = get_absolute_time();
+            display.oled_init();
+        }
+        
+
+        // If left PB was just pressed, decrease brightness
+        if (!pb_left_state && pb_left_prev_state)
+        {
+            nv_settings.data.disp_brightness -= 16;
+            display.set_brightness(nv_settings.data.disp_brightness);
+            nv_settings.store_data();
+        }
+
+        // If right PB was just pressed, increase brightness
+        if (!pb_right_state && pb_right_prev_state)
+        {
+            nv_settings.data.disp_brightness += 16;
+            display.set_brightness(nv_settings.data.disp_brightness);       
+            nv_settings.store_data();                 
+        }
 
 
+    
         // start display stuff
         display.fill(0);
 
@@ -327,6 +373,18 @@ int main()
         display.print_num("MOT: %2.0fC", data_pt.temp_motor);
         display.draw_hbar(data_pt.temp_motor/110.0 * 100.0,0, TEMP_BAR_X,MOTOR_TEMP_Y,110,MOTOR_TEMP_Y + TEMP_BAR_HEIGHT);
 
+        // TODO: fps counter
+        // every second count how many frames
+        // fps += 1;
+        // if(absolute_time_diff_us(get_absolute_time(),next_fps_count) >= 0)
+        // {
+        //     // show fps in top right corner
+        //     display.set_cursor(OLED_WIDTH - 10,0);
+        //     display.print_num("%2.0", fps);
+        //     delayed_by_ms(next_fps_count,1000); // set next fps count timer
+        //     fps = 0; // 
+        // }
+
         
 
         mutex_exit(&float_mutex);
@@ -393,21 +451,6 @@ int main()
     //     else
     //         display.draw_box(105, 30, 125, 50);
 
-    //     // If left PB was just pressed
-    //     if (pb_left_state && !pb_left_prev_state)
-    //     {
-    //         nv_settings.data.disp_brightness -= 16;
-    //         display.set_brightness(nv_settings.data.disp_brightness);
-    //         nv_settings.store_data();
-    //     }
-
-    //     // If right PB was just pressed
-    //     if (pb_right_state && !pb_right_prev_state)
-    //     {
-    //         nv_settings.data.disp_brightness += 16;
-    //         display.set_brightness(nv_settings.data.disp_brightness);       
-    //         nv_settings.store_data();                 
-    //     }
 
     //     pb_left_prev_state = pb_left_state;
     //     pb_right_prev_state = pb_right_state;
