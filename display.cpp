@@ -35,6 +35,7 @@
 
 #include "pico-oled/font/press_start_2p.h"
 #include "pico-oled/font/too_simple.h"
+#include "pico-oled/font/Retron2000.h"
 
 /*  TODO: 
  - add a function in pico-led library to blank out the area where text would be
