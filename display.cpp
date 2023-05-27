@@ -119,6 +119,15 @@ int main()
     display.set_font(too_simple);
     //display.set_font(press_start_2p);
 
+    //////////////// font test
+    display.set_font(Retron2000);
+
+    display.set_cursor(0,-4);
+    display.print("123456789\nabcdefghi");
+    display.render();
+    for(;;);
+    ////////////////
+
     // // Print out some system information
     // uint32_t f_clk_sys = frequency_count_khz(CLOCKS_FC0_SRC_VALUE_CLK_SYS);
 
