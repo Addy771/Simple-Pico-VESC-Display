@@ -36,12 +36,22 @@
 #include "pico-oled/font/press_start_2p.h"
 #include "pico-oled/font/too_simple.h"
 #include "pico-oled/font/Retron2000.h"
+#include "pico-oled/font/future_real.h"
 
 /*  TODO: 
- - add a function in pico-led library to blank out the area where text would be
- - improve analog gauge to have adjustable needle len
- - add a horizontal/vertical analog gauge 
- - add bigger font for main data (speed,power)
+- add a function in pico-led library to blank out the area where text would be
+- improve analog gauge to have adjustable needle len
+- add a horizontal/vertical analog gauge 
+- [x]add bigger font for main data (speed,power)  
+- fix future_real font
+    - bottom pixels are cut off
+    - number 3 is extra thick on the right
+    - add dot, negative, positive and maybe other symbols or alphabet
+- autocentering text function
+- add better debug mode to be entered from display
+- clean up old commented out code
+- adjust rolling average for power/speed to be faster response
+
 
 */
 
@@ -56,6 +66,14 @@
 #define BOOTLOADER_BUTTON_TIME 0.5     // time in seconds for buttons to be pressed before entering bootloader mode
 #define DISPLAY_RESET_BUTTON_TIME 2
 
+#define BATT_TERMINAL_TOP_LEFT_X 4  // TODO: figure out a better way to do this
+#define BATT_TERMINAL_TOP_LEFT_Y 15
+#define BATT_TERMINAL_WIDTH 8
+#define BATT_TERMINAL_HEIGHT 3
+
+// function prototypes
+void draw_battery_icon();
+
 void core1_entry();
 
 uint32_t real_baudrate = 0;
@@ -65,6 +83,12 @@ uint8_t vesc_connected = 0;
 uint8_t get_values_response[100];
 
 float adc_v1, adc_v2;
+float b_cur_avg = 0;
+float b_volts_avg = 0;
+float m_erpm_avg = 0;
+float kph = 0;
+float fps = 0;
+uint8_t b_soc = 0;
 
 uint8_t pb_left_state, pb_left_prev_state;
 uint8_t pb_right_state, pb_right_prev_state;
@@ -118,15 +142,6 @@ int main()
 
     display.set_font(too_simple);
     //display.set_font(press_start_2p);
-
-    //////////////// font test
-    display.set_font(Retron2000);
-
-    display.set_cursor(0,-4);
-    display.print("123456789\nabcdefghi");
-    display.render();
-    for(;;);
-    ////////////////
 
     // // Print out some system information
     // uint32_t f_clk_sys = frequency_count_khz(CLOCKS_FC0_SRC_VALUE_CLK_SYS);
@@ -182,7 +197,8 @@ int main()
 
     // while(!debouncer.read(PB_LEFT_GPIO) && !debouncer.read(PB_RIGHT_GPIO));
 
-    sleep_ms(2000);    
+
+    sleep_ms(2000); // can remove?
 
     // Start core 1
     multicore_launch_core1(core1_entry);
@@ -201,15 +217,10 @@ int main()
     speed_gauge.set_markers(6, 106, 12, 1);
 
     char temp_str[20];
-    uint8_t temp_str_x, temp_str_y, b_soc;
+    uint8_t temp_str_x, temp_str_y;
 
     #define ROLLING_AVG_RATIO 0.3
 
-    float b_cur_avg = 0;
-    float b_volts_avg = 0;
-    float m_erpm_avg = 0;
-    float kph = 0;
-    float fps = 0;
     
     absolute_time_t timer_ms = get_absolute_time();
     absolute_time_t next_frame_time = timer_ms;
@@ -217,8 +228,8 @@ int main()
     absolute_time_t next_fps_count = timer_ms;
 
    
-    enum state {Default, AnalogSpeed};
-    state display_state = 0;
+    enum state {DefaultState, AnalogSpeed};
+    state display_state = DefaultState;
    
     
 
@@ -316,7 +327,7 @@ int main()
         ////////////////////////////////////////////////////////////////////////////////////////////////
         switch (display_state)
         {
-        case Default:
+        case DefaultState:
             // TODO:
             // minimalist display with big font and ez to read
             /*
@@ -324,13 +335,75 @@ int main()
             TEMP
             SPEED
             POWER
-        
-            
-            
             */
-           draw_battery_icon()
+            draw_battery_icon();
+
+            // Draw small text stuff
+            // // TODO: Display throttle intensity visually (ADC1) next to regen (ADC2)
+            #define THROTTLE_BAR_WIDTH 5
+            #define THROTTLE_BAR_HEIGHT 20
 
 
+            display.set_cursor(OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH*2, 10);
+            display.print("T\nH\nR\nO\nT");
+
+            display.set_cursor(OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH + 1, 10);
+            display.print("R\nE\nG\nE\nN");
+
+            // Draw Throttle bar
+            display.draw_vbar(data_pt.adc1_decoded*100, OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH*2, OLED_HEIGHT - 1 - THROTTLE_BAR_HEIGHT, OLED_WIDTH - 1-THROTTLE_BAR_WIDTH, OLED_HEIGHT - 1);
+            // Draw Regen Bar
+            display.draw_vbar(data_pt.adc2_decoded*100, OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH, OLED_HEIGHT - 1 - THROTTLE_BAR_HEIGHT, OLED_WIDTH - 1, OLED_HEIGHT - 1);
+            
+
+            // TODO: Display FET/MOTOR temperature and bar graph and change max temp to non hardcode
+            #define TEMP_BAR_X 70
+            #define TEMP_BAR_HEIGHT 5
+            #define FET_TEMP_Y 0
+            #define MOTOR_TEMP_Y (FET_TEMP_Y + 5 + 1)
+        
+            display.set_cursor(24, 0);
+            display.print_num("FETS: %2.0fC", data_pt.temp_mos);
+            display.draw_hbar(data_pt.temp_mos/110.0 * 100.0,0, TEMP_BAR_X,0,110,TEMP_BAR_HEIGHT);
+            
+
+            display.set_cursor(24, MOTOR_TEMP_Y);
+            display.print_num("MOT: %2.0fC", data_pt.temp_motor);
+            display.draw_hbar(data_pt.temp_motor/110.0 * 100.0,0, TEMP_BAR_X,MOTOR_TEMP_Y,110,MOTOR_TEMP_Y + TEMP_BAR_HEIGHT);
+            
+
+
+
+            // Draw big text stuff
+            // KPH = ERPM / Pole Pairs * wheel diameter(mm)/1000000 * PI * 60 min/hour
+            // 
+            // TODO: lots of temp stuff. Need to get big font for KPH and W letters
+            
+            display.set_font(future_real);
+            kph = float(m_erpm_avg/23 * 660/1000000 * 3.1415 * 60);
+            sprintf(temp_str, "%.0f", kph);
+            display.get_str_dimensions(temp_str, &temp_str_x, &temp_str_y);
+
+
+
+            // Display Speed text
+            display.set_cursor(OLED_WIDTH/2 - 1 - (temp_str_x/2), 20);
+            display.print(temp_str);
+
+            // Display Power on next row
+            sprintf(temp_str, "%.0f", b_cur_avg * b_volts_avg);
+            display.get_str_dimensions(temp_str, &temp_str_x, &temp_str_y);      
+            display.set_cursor(OLED_WIDTH/2 - 1 - (temp_str_x/2), 20 + display.get_font_height() + 1);       
+            display.print(temp_str);
+
+            
+           
+           // draw temp
+           // draw speed
+           // draw power
+           //
+
+            display.set_font(too_simple); // reset to the small font
             break;
 
         case AnalogSpeed:
@@ -512,7 +585,16 @@ int main()
 
 void draw_battery_icon()
 {
-    
+   
+
+    display.draw_vbar(b_soc, 0, 18, 15, OLED_HEIGHT - 1); // Battery icon outline
+    display.fill_rect(0, BATT_TERMINAL_TOP_LEFT_X, BATT_TERMINAL_TOP_LEFT_Y, BATT_TERMINAL_TOP_LEFT_X + BATT_TERMINAL_WIDTH, BATT_TERMINAL_TOP_LEFT_Y + BATT_TERMINAL_HEIGHT); // Draw block to represent battery terminal
+
+    // Batt Voltage and Current text
+    display.set_cursor(2, 0);
+    display.print_num("%.1fV", b_volts_avg);
+    display.set_cursor(2,display.get_font_height());
+    display.print_num("%.0fA", b_cur_avg);
 }
 
 void uart0_write(uint8_t * src, size_t len)
