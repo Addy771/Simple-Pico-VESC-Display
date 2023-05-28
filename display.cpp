@@ -35,6 +35,7 @@
 
 #include "pico-oled/font/press_start_2p.h"
 #include "pico-oled/font/too_simple.h"
+#include "pico-oled/font/Retron2000.h"
 
 /*  TODO: 
  - add a function in pico-led library to blank out the area where text would be
@@ -117,6 +118,15 @@ int main()
 
     display.set_font(too_simple);
     //display.set_font(press_start_2p);
+
+    //////////////// font test
+    display.set_font(Retron2000);
+
+    display.set_cursor(0,-4);
+    display.print("123456789\nabcdefghi");
+    display.render();
+    for(;;);
+    ////////////////
 
     // // Print out some system information
     // uint32_t f_clk_sys = frequency_count_khz(CLOCKS_FC0_SRC_VALUE_CLK_SYS);
