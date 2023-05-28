@@ -205,6 +205,11 @@ int main()
     absolute_time_t next_frame_time = timer_ms;
     absolute_time_t left_button_timer = timer_ms;
     absolute_time_t next_fps_count = timer_ms;
+
+   
+    enum state {Default, AnalogSpeed};
+    state display_state = 0;
+   
     
 
 
@@ -282,6 +287,10 @@ int main()
         // Update rolling averages
         b_cur_avg = (1 - ROLLING_AVG_RATIO) * b_cur_avg + ROLLING_AVG_RATIO * data_pt.current_in;
         b_volts_avg = (1 - ROLLING_AVG_RATIO) * b_volts_avg + ROLLING_AVG_RATIO * data_pt.v_in;
+
+        // for now hardcode 13S battery Full =54.6V empty = 39V (3.0/cell) (delta V = 15.6)
+        b_soc = MIN(((b_volts_avg - 39.0) * 100 / 15.6), 100); // Get scale from min to max batt V
+
         #ifdef DEBUG
 
         // DEBUG: use buttons to change speed
@@ -292,99 +301,127 @@ int main()
         #else
         m_erpm_avg = (1 - ROLLING_AVG_RATIO) * m_erpm_avg + ROLLING_AVG_RATIO * abs(data_pt.rpm);
         #endif
-        // Display battery voltage visually and numerically
-        // TODO: Get max Batt V from vesc for auto ranging soc value
-        // for now hardcode 13S battery Full =54.6V empty = 39V (3.0/cell) (delta V = 15.6)
-        b_soc = MIN(((b_volts_avg - 39.0) * 100 / 15.6), 100); // Get scale from min to max batt V
-        #define BATT_TERMINAL_TOP_LEFT_X 4
-        #define BATT_TERMINAL_TOP_LEFT_Y 15
-        #define BATT_TERMINAL_WIDTH 8
-        #define BATT_TERMINAL_HEIGHT 3
 
-        display.draw_vbar(b_soc, 0, 18, 15, OLED_HEIGHT - 1); // Battery icon outline
-        display.fill_rect(0, BATT_TERMINAL_TOP_LEFT_X, BATT_TERMINAL_TOP_LEFT_Y, BATT_TERMINAL_TOP_LEFT_X + BATT_TERMINAL_WIDTH, BATT_TERMINAL_TOP_LEFT_Y + BATT_TERMINAL_HEIGHT); // Draw block to represent battery terminal
 
-        // Batt Voltage and Current text
-        display.set_cursor(2, 0);
-        display.print_num("%.1fV", b_volts_avg);
-        display.set_cursor(2,display.get_font_height());
-        display.print_num("%.0fA", b_cur_avg);
-
-        // Display Speed on gauge
-        // KPH = ERPM / Pole Pairs * wheel diameter(mm)/1000000 * PI * 60 min/hour
-        // 
+        ////////////////////////////////////////////////////////////////////////////////////////////////
+        switch (display_state)
+        {
+        case Default:
+            // TODO:
+            // minimalist display with big font and ez to read
+            /*
+            BATTERY ICON
+            TEMP
+            SPEED
+            POWER
         
-        kph = float(m_erpm_avg/23 * 660/1000000 * 3.1415 * 60);
-        speed_gauge.set_value(kph);
-        speed_gauge.draw();
-        sprintf(temp_str, "%.1f KPH", kph);
-        display.get_str_dimensions(temp_str, &temp_str_x, &temp_str_y);
+            
+            
+            */
+           draw_battery_icon()
 
 
-        // Blank out underneath text (1 pixel bigger than text box)
-        display.fill_rect(1, OLED_WIDTH/2 - 1 - (temp_str_x/2) - 1, TEXT_UNDER_SPEEDO_Y_START, OLED_WIDTH/2 - 1 + (temp_str_x/2), TEXT_UNDER_SPEEDO_Y_START + 2*temp_str_y+1);
+            break;
 
-        // Display Speed text
-        display.set_cursor(OLED_WIDTH/2 - 1 - (temp_str_x/2), TEXT_UNDER_SPEEDO_Y_START);
-        display.print(temp_str);
+        case AnalogSpeed:
+            // Display battery voltage visually and numerically
+            // TODO: Get max Batt V from vesc for auto ranging soc value
+            
+            #define BATT_TERMINAL_TOP_LEFT_X 4
+            #define BATT_TERMINAL_TOP_LEFT_Y 15
+            #define BATT_TERMINAL_WIDTH 8
+            #define BATT_TERMINAL_HEIGHT 3
 
-        // Display Power
-        sprintf(temp_str, "%.0fW", b_cur_avg * b_volts_avg);
-        display.get_str_dimensions(temp_str, &temp_str_x, &temp_str_y);      
-        display.set_cursor(OLED_WIDTH/2 - 1 - (temp_str_x/2), TEXT_UNDER_SPEEDO_Y_START + display.get_font_height() + 1);       
-        display.print(temp_str);
+            display.draw_vbar(b_soc, 0, 18, 15, OLED_HEIGHT - 1); // Battery icon outline
+            display.fill_rect(0, BATT_TERMINAL_TOP_LEFT_X, BATT_TERMINAL_TOP_LEFT_Y, BATT_TERMINAL_TOP_LEFT_X + BATT_TERMINAL_WIDTH, BATT_TERMINAL_TOP_LEFT_Y + BATT_TERMINAL_HEIGHT); // Draw block to represent battery terminal
+
+            // Batt Voltage and Current text
+            display.set_cursor(2, 0);
+            display.print_num("%.1fV", b_volts_avg);
+            display.set_cursor(2,display.get_font_height());
+            display.print_num("%.0fA", b_cur_avg);
+
+            // Display Speed on gauge
+            // KPH = ERPM / Pole Pairs * wheel diameter(mm)/1000000 * PI * 60 min/hour
+            // 
+            
+            kph = float(m_erpm_avg/23 * 660/1000000 * 3.1415 * 60);
+            speed_gauge.set_value(kph);
+            speed_gauge.draw();
+            sprintf(temp_str, "%.1f KPH", kph);
+            display.get_str_dimensions(temp_str, &temp_str_x, &temp_str_y);
 
 
-        // Display watt-hours charged numerically
-        // TODO Watt hours used instead
-        // display.fill_rect(1, 18, 52, 117, OLED_HEIGHT - 1);  // Blank out area where text will draw
-        // display.set_cursor(19, 54);
-        // display.print_num("WATT-HRS GENERATED: %.1f", data_pt.watt_hours_charged);
+            // Blank out underneath text (1 pixel bigger than text box)
+            display.fill_rect(1, OLED_WIDTH/2 - 1 - (temp_str_x/2) - 1, TEXT_UNDER_SPEEDO_Y_START, OLED_WIDTH/2 - 1 + (temp_str_x/2), TEXT_UNDER_SPEEDO_Y_START + 2*temp_str_y+1);
 
-        // // TODO: Display throttle intensity visually (ADC1) next to regen (ADC2)
-        #define THROTTLE_BAR_WIDTH 5
-        #define THROTTLE_BAR_HEIGHT 20
+            // Display Speed text
+            display.set_cursor(OLED_WIDTH/2 - 1 - (temp_str_x/2), TEXT_UNDER_SPEEDO_Y_START);
+            display.print(temp_str);
+
+            // Display Power
+            sprintf(temp_str, "%.0fW", b_cur_avg * b_volts_avg);
+            display.get_str_dimensions(temp_str, &temp_str_x, &temp_str_y);      
+            display.set_cursor(OLED_WIDTH/2 - 1 - (temp_str_x/2), TEXT_UNDER_SPEEDO_Y_START + display.get_font_height() + 1);       
+            display.print(temp_str);
 
 
-        display.set_cursor(OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH*2, 10);
-        display.print("T\nH\nR\nO\nT");
+            // Display watt-hours charged numerically
+            // TODO Watt hours used instead
+            // display.fill_rect(1, 18, 52, 117, OLED_HEIGHT - 1);  // Blank out area where text will draw
+            // display.set_cursor(19, 54);
+            // display.print_num("WATT-HRS GENERATED: %.1f", data_pt.watt_hours_charged);
 
-        display.set_cursor(OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH + 1, 10);
-        display.print("R\nE\nG\nE\nN");
+            // // TODO: Display throttle intensity visually (ADC1) next to regen (ADC2)
+            #define THROTTLE_BAR_WIDTH 5
+            #define THROTTLE_BAR_HEIGHT 20
 
-        // Draw Throttle bar
-        display.draw_vbar(data_pt.adc1_decoded*100, OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH*2, OLED_HEIGHT - 1 - THROTTLE_BAR_HEIGHT, OLED_WIDTH - 1-THROTTLE_BAR_WIDTH, OLED_HEIGHT - 1);
-        // Draw Regen Bar
-        display.draw_vbar(data_pt.adc2_decoded*100, OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH, OLED_HEIGHT - 1 - THROTTLE_BAR_HEIGHT, OLED_WIDTH - 1, OLED_HEIGHT - 1);
+
+            display.set_cursor(OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH*2, 10);
+            display.print("T\nH\nR\nO\nT");
+
+            display.set_cursor(OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH + 1, 10);
+            display.print("R\nE\nG\nE\nN");
+
+            // Draw Throttle bar
+            display.draw_vbar(data_pt.adc1_decoded*100, OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH*2, OLED_HEIGHT - 1 - THROTTLE_BAR_HEIGHT, OLED_WIDTH - 1-THROTTLE_BAR_WIDTH, OLED_HEIGHT - 1);
+            // Draw Regen Bar
+            display.draw_vbar(data_pt.adc2_decoded*100, OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH, OLED_HEIGHT - 1 - THROTTLE_BAR_HEIGHT, OLED_WIDTH - 1, OLED_HEIGHT - 1);
+            
+
+            // TODO: Display FET/MOTOR temperature and bar graph and change max temp to non hardcode
+            #define TEMP_BAR_X 70
+            #define TEMP_BAR_HEIGHT 5
+            #define FET_TEMP_Y 0
+            #define MOTOR_TEMP_Y (FET_TEMP_Y + 5 + 1)
         
+            display.set_cursor(24, 0);
+            display.print_num("FETS: %2.0fC", data_pt.temp_mos);
+            display.draw_hbar(data_pt.temp_mos/110.0 * 100.0,0, TEMP_BAR_X,0,110,TEMP_BAR_HEIGHT);
+            
 
-        // TODO: Display FET/MOTOR temperature and bar graph and change max temp to non hardcode
-        #define TEMP_BAR_X 70
-        #define TEMP_BAR_HEIGHT 5
-        #define FET_TEMP_Y 0
-        #define MOTOR_TEMP_Y (FET_TEMP_Y + 5 + 1)
-    
-        display.set_cursor(24, 0);
-        display.print_num("FETS: %2.0fC", data_pt.temp_mos);
-        display.draw_hbar(data_pt.temp_mos/110.0 * 100.0,0, TEMP_BAR_X,0,110,TEMP_BAR_HEIGHT);
+            display.set_cursor(24, MOTOR_TEMP_Y);
+            display.print_num("MOT: %2.0fC", data_pt.temp_motor);
+            display.draw_hbar(data_pt.temp_motor/110.0 * 100.0,0, TEMP_BAR_X,MOTOR_TEMP_Y,110,MOTOR_TEMP_Y + TEMP_BAR_HEIGHT);
+
+            // TODO: fps counter
+            // every second count how many frames
+            // fps += 1;
+            // if(absolute_time_diff_us(get_absolute_time(),next_fps_count) >= 0)
+            // {
+            //     // show fps in top right corner
+            //     display.set_cursor(OLED_WIDTH - 10,0);
+            //     display.print_num("%2.0", fps);
+            //     delayed_by_ms(next_fps_count,1000); // set next fps count timer
+            //     fps = 0; // 
+            // }
+            break;
         
+        default:
+            break;
+        }
 
-        display.set_cursor(24, MOTOR_TEMP_Y);
-        display.print_num("MOT: %2.0fC", data_pt.temp_motor);
-        display.draw_hbar(data_pt.temp_motor/110.0 * 100.0,0, TEMP_BAR_X,MOTOR_TEMP_Y,110,MOTOR_TEMP_Y + TEMP_BAR_HEIGHT);
-
-        // TODO: fps counter
-        // every second count how many frames
-        // fps += 1;
-        // if(absolute_time_diff_us(get_absolute_time(),next_fps_count) >= 0)
-        // {
-        //     // show fps in top right corner
-        //     display.set_cursor(OLED_WIDTH - 10,0);
-        //     display.print_num("%2.0", fps);
-        //     delayed_by_ms(next_fps_count,1000); // set next fps count timer
-        //     fps = 0; // 
-        // }
-
+        
         
 
         mutex_exit(&float_mutex);
@@ -463,6 +500,10 @@ int main()
     // }
 }
 
+void draw_battery_icon()
+{
+    
+}
 
 void uart0_write(uint8_t * src, size_t len)
 {
