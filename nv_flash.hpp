@@ -15,9 +15,10 @@
 
 typedef struct 
 {
-    uint8_t write_mark;
-    uint8_t disp_brightness;
-    uint32_t log_num;
+    uint8_t write_mark = WRITE_MARKER;
+    uint8_t disp_brightness = 0;
+    uint32_t log_num = 0;
+    float odometer = 0.0;
 } nv_flash_struct;
 
 

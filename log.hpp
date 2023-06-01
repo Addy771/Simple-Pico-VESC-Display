@@ -23,8 +23,12 @@ typedef enum
 
 typedef struct
 {
+    // calculated values
     float p_in;
     float speed_kph;
+    float odometer;
+
+    // values from vesc
     int ms_today;       // Time of day in ms
     float adc1_decoded;
     float adc2_decoded;

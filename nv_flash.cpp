@@ -55,13 +55,6 @@ nv_flash_storage::nv_flash_storage(mutex_t *flash_write_lock)
         address = XIP_BASE + FLASH_TARGET_OFFSET + (page_id * FLASH_PAGE_SIZE) + (block_id * BLOCK_SIZE);
         memcpy(&data, address, sizeof(nv_flash_struct));
     }
-    else
-    {
-        // Otherwise, initialize the data structure with default values
-        data.write_mark = WRITE_MARKER;
-        data.disp_brightness = 0;
-        data.log_num = 0;
-    }
 }
 
 
