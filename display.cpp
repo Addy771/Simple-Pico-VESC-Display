@@ -51,7 +51,7 @@
 - add better debug mode to be entered from display
 - clean up old commented out code
 - adjust rolling average for power/speed to be faster response
-- add odometer
+- [x] add odometer
 - whr/km
 - whr used
 
@@ -61,7 +61,7 @@
 */
 
 // Comment out debug when not using
-#define DEBUG
+//#define DEBUG
 
 // oled defines
 #define OLED_HEIGHT 64
@@ -79,6 +79,7 @@
 
 // function prototypes
 void draw_battery_icon();
+void process_speed_calc();
 
 void core1_entry();
 
@@ -87,6 +88,8 @@ uint8_t response_code = 0;
 uint8_t vesc_connected = 0;
 
 uint8_t get_values_response[100];
+
+absolute_time_t prev_time_sample = get_absolute_time();
 
 float adc_v1, adc_v2;
 float b_cur_avg = 0;
@@ -97,13 +100,13 @@ float fps = 0;
 float average_speed = 0;
 float distance_travelled = 0;
 float prev_kph = 0;
-int64_t time_us = 0;
+int64_t time_between_odo_samples_us = 0;
 uint8_t b_soc = 0;
 
 uint8_t pb_left_state, pb_left_prev_state;
 uint8_t pb_right_state, pb_right_prev_state;
 
-auto_init_mutex(float_mutex);
+auto_init_mutex(float_mutex); // mutex for doing float calculations only on 1 core at a time
 
 pico_oled display(OLED_SSD1309, /*i2c_address=*/ 0x3C, /*screen_width=*/ 128, /*screen_height=*/ 64, /*reset_gpio=*/ 15); 
 
@@ -239,7 +242,7 @@ int main()
     absolute_time_t left_button_timer = current_time_ms;
     absolute_time_t next_fps_count = current_time_ms;
     absolute_time_t last_odometer_count = current_time_ms;
-    absolute_time_t prev_time_sample = current_time_ms;
+    
 
     int64_t time_between_odometer_check_ms = 0;
 
@@ -247,8 +250,9 @@ int main()
     
 
    
-    enum state {DefaultState, AnalogSpeedState,DebugState};
+    enum state {DefaultState, AnalogSpeedState,DebugState, LENGTH_STATES};
     state display_state = DefaultState;
+
 
     while(true)
     {
@@ -299,53 +303,33 @@ int main()
         }
         
 
-        // If left PB was just pressed, decrease brightness
+        // If left PB was just pressed, change display state
         if (!pb_left_state && pb_left_prev_state)
         {
-            nv_settings.data.disp_brightness -= 16;
-            display.set_brightness(nv_settings.data.disp_brightness);
-            nv_settings.store_data();
+            // Wrap around display state
+            display_state = (state)((display_state + LENGTH_STATES - 1) % LENGTH_STATES);
+            // nv_settings.data.disp_brightness -= 16;
+            // display.set_brightness(nv_settings.data.disp_brightness);
+            // nv_settings.store_data();
         }
 
-        // If right PB was just pressed, increase brightness
+        // If right PB was just pressed, change display state
         if (!pb_right_state && pb_right_prev_state)
         {
-            nv_settings.data.disp_brightness += 16;
-            display.set_brightness(nv_settings.data.disp_brightness);       
-            nv_settings.store_data();                 
+            display_state = (state)((display_state + 1) % LENGTH_STATES);
+            // nv_settings.data.disp_brightness += 16;
+            // display.set_brightness(nv_settings.data.disp_brightness);       
+            // nv_settings.store_data();                 
         }
 
 
         // Other calculations 
         // Speed calculation
-        // core 1 should be doing speed calculations
-        // // KPH = ERPM / Pole Pairs * wheel diameter(mm)/1000000 * PI * 60 min/hour
-        // kph = float(m_erpm_avg/23 * 660/1000000 * 3.1415 * 60);
-
-        // // Odometer calculation
-        // // Distance = avg Speed * time
-        // static float average_speed = 0;
-        // static float time_hours = 0;
-        // static float distance_travelled = 0;
-        // // if time has been at least ODOMETER_UPDATE_INTERVAL_MS, calculate distance traveled and add to odometer
-        // time_between_odometer_check_ms = absolute_time_diff_us(last_odometer_count,current_time_ms)/1000;
-
-        // if (time_between_odometer_check_ms >= ODOMETER_UPDATE_INTERVAL_MS)
-        // {
-        //     average_speed = abs((kph + prev_kph_for_odometer))/2;
-        //     time_hours = time_between_odometer_check_ms/3600.0/1000.0;// convert kph * ms to km (odo)
-        //     distance_travelled = average_speed * time_hours;
-        //     odometer += distance_travelled;
-        //     prev_kph_for_odometer = kph;
-        //     last_odometer_count = current_time_ms;
-        // }
-        
-        
-
     
         // Start display stuff
         display.fill(0);
 
+        
         mutex_enter_blocking(&float_mutex);
 
         // Update rolling averages
@@ -545,41 +529,28 @@ int main()
             //     delayed_by_ms(next_fps_count,1000); // set next fps count timer
             //     fps = 0; // 
             // }
-            break;}
+            break;
+            }
 
         case DebugState:
             {// Do debug stuff
 
-            // do debug data here instead of getting from vesc
-            data_pt.speed_kph = float(data_pt.rpm/23.0 * 660/1000000 * 3.1415 * 60);
-            // average speed * time travelled * (kph * us to km conversion)
-            average_speed = (prev_kph + data_pt.speed_kph)/2;
-            time_us = absolute_time_diff_us(prev_time_sample,get_absolute_time());
-            distance_travelled = (double)(average_speed * time_us/(3600)); // distance travelled as mm
-            data_pt.odometer = (double)(data_pt.odometer +  distance_travelled/1000000.0); // convert distance_travelled to km and add to odo
-            // double check proper math is done and not truncated due to data types
-
-            prev_kph = data_pt.speed_kph;
-            prev_time_sample = get_absolute_time();
-
+            //process_speed_calc();
             display.set_cursor(0,0);
-            char debug_string[200];
-            sprintf(debug_string,"odometer:%f\n\
-            kph:%f\n\
-            erpm:%f\n\
-            prev_kph:%f\n\
-            average_speed:%f\n\
-            time_us:%d\n\
-            distance_trv:%f\n\
-            ",data_pt.odometer,data_pt.speed_kph,data_pt.rpm,prev_kph,average_speed,time_us,distance_travelled);
-            display.print(debug_string);
 
-        default:
-            break;}
+            // change the strings on the following lines to be uppercase
+
+            display.print_num("KPH:%f\n",data_pt.speed_kph);
+            display.print_num("ERPM:%f\n",data_pt.rpm);
+            display.print_num("ODO:%f\n",data_pt.odometer);
+            display.print_num("PREV_KPH:%f\n",prev_kph);
+            display.print_num("AVG_SPEED:%f\n",average_speed);
+            display.print_num("TIME_BTW_ODO_US:%d\n",(int32_t)time_between_odo_samples_us);
+            display.print_num("DISTANCE_TRV:%f\n",distance_travelled);
+
+            break;
+            }
         }
-
-        
-        
 
         mutex_exit(&float_mutex);
         display.render();
@@ -671,6 +642,7 @@ void draw_battery_icon()
     display.print_num("%.0fA", b_cur_avg);
 }
 
+
 void uart0_write(uint8_t * src, size_t len)
 {
     uart_write_blocking(uart0, src, len);
@@ -697,6 +669,26 @@ uint8_t receive_packet(PACKET_STATE_t *rx_packet)
 }
 
 void process_data(uint8_t *data, size_t len);
+
+
+// Do the speed and odometer calculation here
+void process_speed_calc()
+{
+    absolute_time_t current_time = get_absolute_time();
+    time_between_odo_samples_us = absolute_time_diff_us(prev_time_sample,current_time);
+    prev_time_sample = current_time; // update prev_time_sample to current time
+
+    // calculate speed and odometer
+    data_pt.speed_kph = float(data_pt.rpm/23.0 * 660/1000000 * 3.1415 * 60);
+    // average speed * time travelled * (kph * us to km conversion)
+    average_speed = abs((prev_kph + data_pt.speed_kph))/2;
+    distance_travelled = average_speed * time_between_odo_samples_us/(3600); // distance travelled as mm
+    data_pt.odometer += distance_travelled/1000000.0; // convert distance_travelled to km and add to odo
+    // double check proper math is done and not truncated due to data types
+
+    // Update prev_kph to current speed
+    prev_kph = data_pt.speed_kph;
+}
 
 
 // Second core thread. Handles UART communication
@@ -830,9 +822,6 @@ void process_data(uint8_t *data, size_t len)
     // Check packet ID and handle different packets accordingly ***
     int32_t idx = 0;
     uint8_t packet_id = data[idx++];
-    static float prev_kph = 0;
-    static absolute_time_t prev_time_sample = get_absolute_time();
-
 
     switch (packet_id)
     {
@@ -877,19 +866,7 @@ void process_data(uint8_t *data, size_t len)
             // Power
             data_pt.p_in = data_pt.current_in * data_pt.v_in;
             // Speed calculation
-            // TODO: change hardcode wheel diameter and get from vesc
-            // KPH = ERPM / Pole Pairs * wheel diameter(mm)/1000000 * PI * 60 min/hour
-
-            data_pt.speed_kph = float(data_pt.rpm/23.0 * 660/1000000 * 3.1415 * 60);
-            
-            // do debug data here instead of getting from vesc
-            data_pt.speed_kph = float(data_pt.rpm/23.0 * 660/1000000 * 3.1415 * 60);
-            // average speed * time travelled * (kph * us to km conversion)
-            average_speed = (prev_kph + data_pt.speed_kph)/2;
-            time_us = absolute_time_diff_us(prev_time_sample,get_absolute_time());
-            distance_travelled = (double)(average_speed * time_us/(3600)); // distance travelled as mm
-            data_pt.odometer = (double)(data_pt.odometer +  distance_travelled/1000000.0); // convert distance_travelled to km and add to odo
-            // double check proper math is done and not truncated due to data types
+            process_speed_calc();
 
             //last byte is int8 status, but data_pt struct has no place for it
 
