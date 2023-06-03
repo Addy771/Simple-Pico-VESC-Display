@@ -52,8 +52,12 @@
 - clean up old commented out code
 - adjust rolling average for power/speed to be faster response
 - [x] add odometer
+- []save odometer to flash
 - [x] add Display state button changes
-- add screensave state
+- [x]add screensave state
+    - auto go into screen saver
+    - auto leave screen saver when speed changes or button pressed
+
 - whr/km
 - whr used
 - add settings page
@@ -255,7 +259,7 @@ int main()
     
     uint8_t loop_timer_100ms = 0; // 100ms timer for loop
    
-    enum state {DefaultState, AnalogSpeedState,DebugState, LENGTH_STATES};
+    enum state {DefaultState, AnalogSpeedState,DebugState, ScreensaverState, LENGTH_STATES};
     state display_state = DefaultState;
 
 
@@ -305,7 +309,7 @@ int main()
                 display_slow_flashing_flag = true;
             else
                 display_slow_flashing_flag = false;
-                
+
             if(loop_timer_100ms % SLOW_FLASH_INTERVAL_100MS == 0) // after loop_timer_100ms reaches max value (SLOW_FLASH_INTERVAL_100MS), reset it to 0
             {
             loop_timer_100ms = 0;
@@ -591,6 +595,7 @@ int main()
         case DebugState:
             {// Do debug stuff
 
+
             //process_speed_calc();
             display.set_cursor(0,0);
 
@@ -625,6 +630,94 @@ int main()
             display.print_num("TIME_BTW_ODO_US:%d\n",(int32_t)time_between_odo_samples_us);
             display.print_num("DISTANCE_TRV:%f\n",distance_travelled);
 
+            break;
+            }
+        case ScreensaverState:
+            {// Do screensaver stuff
+            // Create a mode with minimal information that moves around to avoid burn in
+            // show battery volatage and cell voltage with a bar graph
+            // every minute - change positions of things
+
+            display.set_font(future_real); // set to big font
+
+            // 
+            // Get height of both lines of text and bar graph
+            #define BATT_BAR_WIDTH 60
+            #define BATT_BAR_HEIGHT 20
+
+            uint8_t bounding_box_height = BATT_BAR_HEIGHT;
+            uint8_t bounding_box_width = BATT_BAR_WIDTH;
+
+            // Display batt voltage
+            sprintf(temp_str, "%.1f", data_pt.v_in);
+            display.get_str_dimensions(temp_str, &temp_str_x, &temp_str_y);
+            bounding_box_height += temp_str_y;
+            // set width to the max of the two
+            bounding_box_width = (temp_str_x > bounding_box_width) ? temp_str_x : bounding_box_width;
+
+            // Change to small font
+            display.set_font(too_simple);
+            // Calculate Cell voltage
+            sprintf(temp_str, "%.2f", data_pt.v_in / cells_in_series);
+            display.get_str_dimensions(temp_str, &temp_str_x, &temp_str_y);
+            bounding_box_height += temp_str_y;
+            // set width to the max of the two
+            bounding_box_width = (temp_str_x > bounding_box_width) ? temp_str_x : bounding_box_width;
+
+            // Now that we have the bounding box, adjust the position slightly with each update
+            static uint8_t bounding_box_x = 0;
+            static uint8_t bounding_box_y = 0;
+            static uint8_t bounding_box_x_dir = 1; // 1 = right, 0 = left
+            static uint8_t bounding_box_y_dir = 1; // 1 = down, 0 = up
+
+            // Move the bounding box around
+            if(bounding_box_x_dir)
+            {
+                bounding_box_x++;
+                if(bounding_box_x >= (OLED_WIDTH - bounding_box_width))
+                {
+                    bounding_box_x_dir = 0;
+                }
+            }
+            else
+            {
+                bounding_box_x--;
+                if(bounding_box_x <= 0)
+                {
+                    bounding_box_x_dir = 1;
+                }
+            }
+
+            if(bounding_box_y_dir)
+            {
+                bounding_box_y++;
+                if(bounding_box_y >= (OLED_HEIGHT - bounding_box_height))
+                {
+                    bounding_box_y_dir = 0;
+                }
+            }
+            else
+            {
+                bounding_box_y--;
+                if(bounding_box_y <= 0)
+                {
+                    bounding_box_y_dir = 1;
+                }
+            }
+
+            // Draw the bounding box
+            display.draw_box(bounding_box_x, bounding_box_y, bounding_box_x + bounding_box_width, bounding_box_y + bounding_box_height);
+
+            // Draw the text
+            display.set_cursor(bounding_box_x, bounding_box_y);
+            display.set_font(future_real); // set to big font
+            display.print_num("%.1f", data_pt.v_in);
+            display.set_cursor(bounding_box_x, bounding_box_y + display.get_font_height());
+            display.set_font(too_simple); // set to small font
+
+            // Draw the bar graph
+            display.draw_hbar(b_soc,0,bounding_box_x,bounding_box_y,bounding_box_x + BATT_BAR_WIDTH,bounding_box_y + BATT_BAR_HEIGHT);
+            
             break;
             }
         }
