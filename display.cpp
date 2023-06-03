@@ -77,6 +77,10 @@
 #define BATT_TERMINAL_WIDTH 8
 #define BATT_TERMINAL_HEIGHT 3
 
+#define FAST_FLASH_INTERVAL_100MS 5   // 2 * 100ms = 200ms
+#define NORMAL_FLASH_INTERVAL_100MS 10 // 5 * 100ms = 500ms
+#define SLOW_FLASH_INTERVAL_100MS 20  // 10 * 100ms = 1000ms
+
 // function prototypes
 void draw_battery_icon();
 void process_speed_calc();
@@ -91,7 +95,10 @@ uint8_t get_values_response[100];
 
 absolute_time_t prev_time_sample = get_absolute_time();
 
-uint8_t display_flash_flag = false; // flag to indicate if text should be off or on
+
+uint8_t display_normal_flashing_flag = false; // flag to indicate if text shold be shown during a normal flashing
+uint8_t display_fast_flashing_flag = false; // flag to indicate if text should shown during a fast flashing
+uint8_t display_slow_flashing_flag = false; // flag to indicate if text should shown during a slow flashing
 
 float adc_v1, adc_v2;
 float b_cur_avg = 0;
@@ -104,6 +111,7 @@ float distance_travelled = 0;
 float prev_kph = 0;
 int64_t time_between_odo_samples_us = 0;
 uint8_t b_soc = 0;
+uint8_t cells_in_series = 13;   // Hardcoded for now
 
 uint8_t pb_left_state, pb_left_prev_state;
 uint8_t pb_right_state, pb_right_prev_state;
@@ -244,8 +252,6 @@ int main()
     
 
     int64_t time_between_odometer_check_ms = 0;
-
-    float odometer = nv_settings.data.odometer; // todo: change to use data_pt.odometer when code is ready
     
     uint8_t loop_timer_100ms = 0; // 100ms timer for loop
    
@@ -268,17 +274,41 @@ int main()
             prev_loop_time = current_time_ms;
             loop_timer_100ms++;
 
+            // q: how can I use loop_timer_100ms for 2 different timed operations?
+            // a: use modulo operator to check if loop_timer_100ms is a multiple of 5
+            //   if it is, do the thing
+            //  if it isn't, don't do the thing
+            // this way, you can have multiple timed operations in the same loop
+            // and you can have them run at different intervals
+            // and you can have them run at the same interval
+            // and you can have them run at different intervals that are multiples of each other
+            // and you can have them run at different intervals that are not multiples of each other
+            // and you can have them run at the same interval that are multiples of each other
+            // and you can have them run at the same interval that are not multiples of each other
+
+
             // Set things based on loop timer
-            if(loop_timer_100ms >= 5)
-            {
-                // set display flash flag
-                display_flash_flag = true;
-                // reset loop timer
-                loop_timer_100ms = 0;
-            }
+            // use loop_timer_100ms to set the flashing flags
+            // use loop timer to set 3 different flashing flags using modulo operator
+            // the flag should be 50% on and 50% off
+            if(loop_timer_100ms % FAST_FLASH_INTERVAL_100MS >= FAST_FLASH_INTERVAL_100MS/2)
+                display_fast_flashing_flag = true;
             else
+                display_fast_flashing_flag = false;
+            
+            if(loop_timer_100ms % NORMAL_FLASH_INTERVAL_100MS >= NORMAL_FLASH_INTERVAL_100MS/2)
+                display_normal_flashing_flag = true;
+            else
+                display_normal_flashing_flag = false;
+            
+            if(loop_timer_100ms % SLOW_FLASH_INTERVAL_100MS >= SLOW_FLASH_INTERVAL_100MS/2)
+                display_slow_flashing_flag = true;
+            else
+                display_slow_flashing_flag = false;
+                
+            if(loop_timer_100ms % SLOW_FLASH_INTERVAL_100MS == 0) // after loop_timer_100ms reaches max value (SLOW_FLASH_INTERVAL_100MS), reset it to 0
             {
-                display_flash_flag = false;
+            loop_timer_100ms = 0;
             }
         }
 
@@ -392,13 +422,8 @@ int main()
             POWER
             */
 
-           // flash the battery icon every 5 seconds
-           if(display_flash_flag)
-           {
+           
             draw_battery_icon();
-           }
-            
-
 
             // Draw small text stuff
             // // TODO: Display throttle intensity visually (ADC1) next to regen (ADC2)
@@ -570,10 +595,31 @@ int main()
             display.set_cursor(0,0);
 
             // change the strings on the following lines to be uppercase
+            if(display_fast_flashing_flag)
+            {
+                 display.print_num("KPH:%f\n",data_pt.speed_kph);
 
-            display.print_num("KPH:%f\n",data_pt.speed_kph);
-            display.print_num("ERPM:%f\n",data_pt.rpm);
-            display.print_num("ODO:%f\n",data_pt.odometer);
+            }
+            else
+            {
+                display.print("\n");
+            }
+            if(display_normal_flashing_flag)
+            {
+                display.print_num("ERPM:%f\n",data_pt.rpm);
+            }
+            else
+            {
+                display.print("\n");
+            }
+            if(display_slow_flashing_flag)
+            {
+                display.print_num("ODO:%f\n",data_pt.odometer);
+            }
+            else
+            {
+                display.print("\n");
+            }
             display.print_num("PREV_KPH:%f\n",prev_kph);
             display.print_num("AVG_SPEED:%f\n",average_speed);
             display.print_num("TIME_BTW_ODO_US:%d\n",(int32_t)time_between_odo_samples_us);
@@ -668,7 +714,17 @@ void draw_battery_icon()
 
     // Batt Voltage and Current text
     display.set_cursor(2, 0);
-    display.print_num("%.1fV", b_volts_avg);
+    if(display_normal_flashing_flag)
+    {
+        // Display cell voltage (battery voltage / number of cells)
+        display.print_num("%.1fV", b_volts_avg/cells_in_series);
+    }
+    else
+    {
+        // Print out battery voltage
+        display.print_num("%.1fV", b_volts_avg);
+    }
+
     display.set_cursor(2,display.get_font_height());
     display.print_num("%.0fA", b_cur_avg);
 }
