@@ -52,11 +52,11 @@
 - clean up old commented out code
 - adjust rolling average for power/speed to be faster response
 - [x] add odometer
+- [x] add Display state button changes
+- add screensave state
 - whr/km
 - whr used
-
-- add screen saver
-
+- add settings page
 
 */
 
@@ -90,6 +90,8 @@ uint8_t vesc_connected = 0;
 uint8_t get_values_response[100];
 
 absolute_time_t prev_time_sample = get_absolute_time();
+
+uint8_t display_flash_flag = false; // flag to indicate if text should be off or on
 
 float adc_v1, adc_v2;
 float b_cur_avg = 0;
@@ -152,9 +154,6 @@ int main()
     // oled init
     display.oled_init();
     display.set_brightness(nv_settings.data.disp_brightness);   // set brightness from saved flash settings
-
-    display.set_font(too_simple);
-    //display.set_font(press_start_2p);
 
     // // Print out some system information
     // uint32_t f_clk_sys = frequency_count_khz(CLOCKS_FC0_SRC_VALUE_CLK_SYS);
@@ -225,7 +224,6 @@ int main()
     #define MAX_KPH 60
     #define TEXT_UNDER_SPEEDO_Y_START 32
 
-
     analog_gauge speed_gauge(&display);
     speed_gauge.set_position(OLED_WIDTH/2 - 1, 120);
     speed_gauge.set_scale(0,MAX_KPH, 250, 290);
@@ -242,13 +240,14 @@ int main()
     absolute_time_t left_button_timer = current_time_ms;
     absolute_time_t next_fps_count = current_time_ms;
     absolute_time_t last_odometer_count = current_time_ms;
+    absolute_time_t prev_loop_time = current_time_ms;
     
 
     int64_t time_between_odometer_check_ms = 0;
 
     float odometer = nv_settings.data.odometer; // todo: change to use data_pt.odometer when code is ready
     
-
+    uint8_t loop_timer_100ms = 0; // 100ms timer for loop
    
     enum state {DefaultState, AnalogSpeedState,DebugState, LENGTH_STATES};
     state display_state = DefaultState;
@@ -260,6 +259,30 @@ int main()
         sleep_until(next_frame_time);
         current_time_ms = get_absolute_time();
         next_frame_time = delayed_by_ms(next_frame_time, 1000 / OLED_FRAMERATE);
+
+        // Update Loop Timer
+        
+        // if time between current time and last loop time is greater than 100ms, increment loop timer
+        if (absolute_time_diff_us(prev_loop_time, current_time_ms) > 100000)
+        {
+            prev_loop_time = current_time_ms;
+            loop_timer_100ms++;
+
+            // Set things based on loop timer
+            if(loop_timer_100ms >= 5)
+            {
+                // set display flash flag
+                display_flash_flag = true;
+                // reset loop timer
+                loop_timer_100ms = 0;
+            }
+            else
+            {
+                display_flash_flag = false;
+            }
+        }
+
+
 
 
         // TODO: Button reads. 
@@ -328,6 +351,8 @@ int main()
     
         // Start display stuff
         display.fill(0);
+        //display.set_font(press_start_2p); // reset to the small font
+        display.set_font(too_simple); // reset to the small font
 
         
         mutex_enter_blocking(&float_mutex);
@@ -366,7 +391,14 @@ int main()
             SPEED
             POWER
             */
+
+           // flash the battery icon every 5 seconds
+           if(display_flash_flag)
+           {
             draw_battery_icon();
+           }
+            
+
 
             // Draw small text stuff
             // // TODO: Display throttle intensity visually (ADC1) next to regen (ADC2)
@@ -437,7 +469,6 @@ int main()
            // draw power
            //
 
-            display.set_font(too_simple); // reset to the small font
             break;
             }
         case AnalogSpeedState:
