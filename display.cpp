@@ -38,11 +38,11 @@
 #include "pico-oled/font/Retron2000.h"
 #include "pico-oled/font/future_real.h"
 
-/*  TODO: 
+/*  TODO:
 - add a function in pico-led library to blank out the area where text would be
 - improve analog gauge to have adjustable needle len
-- add a horizontal/vertical analog gauge 
-- [x]add bigger font for main data (speed,power)  
+- add a horizontal/vertical analog gauge
+- [x]add bigger font for main data (speed,power)
 - fix future_real font
     - bottom pixels are cut off
     - number 3 is extra thick on the right
@@ -55,12 +55,12 @@
 - []save odometer to flash
 - [x] add Display state button changes
 - [x]add screensave state
-    - auto go into screen saver
-    - auto leave screen saver when speed changes or button pressed
-
-- whr/km
-- whr used
+    [x]- auto go into screen saver
+    [x]- auto leave screen saver when speed changes or button pressed
+- [x]whr/km
+- [x]whr used
 - add settings page
+- add better soc lookup table for li ion battery
 
 */
 
@@ -81,9 +81,15 @@
 #define BATT_TERMINAL_WIDTH 8
 #define BATT_TERMINAL_HEIGHT 3
 
+// Timer interval stuff
 #define FAST_FLASH_INTERVAL_100MS 5   // 2 * 100ms = 200ms
 #define NORMAL_FLASH_INTERVAL_100MS 10 // 5 * 100ms = 500ms
 #define SLOW_FLASH_INTERVAL_100MS 20  // 10 * 100ms = 1000ms
+//#define SCREENSAVER_TIMEOUT_100MS (5*10) // TESTING: 5 seconds
+#define SCREENSAVER_TIMEOUT_100MS (5*60*10) // 5*60*10 * 100ms = 5 minutes
+#define SCREENSAVER_MOVE_INTERVAL_100MS (5*10) // 5 seconds
+//#define ODOMETER_FLASH_INTERVAL_100MS (20*10) // 20 seconds testing
+#define ODOMETER_FLASH_INTERVAL_100MS (5*60*10) // 5 minutes
 
 // function prototypes
 void draw_battery_icon();
@@ -122,7 +128,7 @@ uint8_t pb_right_state, pb_right_prev_state;
 
 auto_init_mutex(float_mutex); // mutex for doing float calculations only on 1 core at a time
 
-pico_oled display(OLED_SSD1309, /*i2c_address=*/ 0x3C, /*screen_width=*/ 128, /*screen_height=*/ 64, /*reset_gpio=*/ 15); 
+pico_oled display(OLED_SSD1309, /*i2c_address=*/ 0x3C, /*screen_width=*/ 128, /*screen_height=*/ 64, /*reset_gpio=*/ 15);
 
 Debounce debouncer;
 
@@ -132,7 +138,7 @@ int main()
 {
 
     stdio_init_all();
-    time_init();    
+    time_init();
 
     // Set Pico DC/DC converter to PWM mode to reduce noise at light load
     gpio_put(23, 1);
@@ -143,8 +149,8 @@ int main()
     gpio_put(DEBUG_GPIO, 1);
 
     // Init i2c and configure it's GPIO pins
-    uint32_t i2c_clk = i2c_init(i2c_default, 400 * 1000);
-    //uint32_t i2c_clk = i2c_init(i2c_default, 1000 * 1000);  // 1120 kHz max (from testing on one display)
+    //uint32_t i2c_clk = i2c_init(i2c_default, 400 * 1000);
+    uint32_t i2c_clk = i2c_init(i2c_default, 1000 * 1000);  // 1120 kHz max (from testing on one display)
     gpio_set_function(PICO_DEFAULT_I2C_SDA_PIN, GPIO_FUNC_I2C);
     gpio_set_function(PICO_DEFAULT_I2C_SCL_PIN, GPIO_FUNC_I2C);
     gpio_pull_up(PICO_DEFAULT_I2C_SDA_PIN);
@@ -162,7 +168,11 @@ int main()
     // Set initial values of button states
     pb_left_prev_state = pb_left_state = debouncer.read(PB_LEFT_GPIO);
     pb_right_prev_state = pb_right_state = debouncer.read(PB_RIGHT_GPIO);
-    
+
+    // Set any initial values from nvsettings
+    data_pt.odometer = nv_settings.data.odometer;
+    // whr/km?
+
     // oled init
     display.oled_init();
     display.set_brightness(nv_settings.data.disp_brightness);   // set brightness from saved flash settings
@@ -174,20 +184,20 @@ int main()
     // for(;;)
     // {
     //     display.fill(0x1);    // 1/8th lit, 12.5%
-    //     display.render();        
+    //     display.render();
     //     sleep_ms(5000);
 
     //     display.fill(0x9);    // 1/4th lit, 25%
-    //     display.render();        
+    //     display.render();
     //     sleep_ms(5000);
 
     //     display.fill(0xAA);    // 1/2th lit, 50%
-    //     display.render();        
+    //     display.render();
     //     sleep_ms(5000);
 
     //     display.fill(0xFF);    // all lit, 100%
-    //     display.render();        
-    //     sleep_ms(5000);        
+    //     display.render();
+    //     sleep_ms(5000);
     // }
 
     // // Show a page of debug values
@@ -233,7 +243,7 @@ int main()
     // Display Setup
 
     // Gauges setup
-    #define MAX_KPH 60
+    #define MAX_KPH 60  // Hardcoded for now
     #define TEXT_UNDER_SPEEDO_Y_START 32
 
     analog_gauge speed_gauge(&display);
@@ -251,16 +261,20 @@ int main()
     absolute_time_t next_frame_time = current_time_ms;
     absolute_time_t left_button_timer = current_time_ms;
     absolute_time_t next_fps_count = current_time_ms;
-    absolute_time_t last_odometer_count = current_time_ms;
     absolute_time_t prev_loop_time = current_time_ms;
-    
 
-    int64_t time_between_odometer_check_ms = 0;
-    
-    uint8_t loop_timer_100ms = 0; // 100ms timer for loop
-   
-    enum state {DefaultState, AnalogSpeedState,DebugState, ScreensaverState, LENGTH_STATES};
+    // Loop Timers
+    uint32_t loop_timer_100ms = 0; // 100ms timer for loop
+    uint32_t screen_saver_timer_100ms = 0; // 100ms timer for screensaver
+
+    // Flags
+    uint8_t odometer_nvflash_flag = 0;
+
+    // LENGTH_USER_STATES is the number of user states, not including the non user states such as the screensaver
+    // Add new states before LENGTH_USER_STATES
+    enum state {DefaultState, AnalogSpeedState,DebugState, StatsState, LENGTH_USER_STATES, ScreensaverState};
     state display_state = DefaultState;
+    state last_display_state = DefaultState;
 
 
     while(true)
@@ -270,8 +284,8 @@ int main()
         current_time_ms = get_absolute_time();
         next_frame_time = delayed_by_ms(next_frame_time, 1000 / OLED_FRAMERATE);
 
+        /////////////////////////////////////////////////////////////////
         // Update Loop Timer
-        
         // if time between current time and last loop time is greater than 100ms, increment loop timer
         if (absolute_time_diff_us(prev_loop_time, current_time_ms) > 100000)
         {
@@ -290,7 +304,7 @@ int main()
             // and you can have them run at the same interval that are multiples of each other
             // and you can have them run at the same interval that are not multiples of each other
 
-
+            /////////////////////////////////////////////
             // Set things based on loop timer
             // use loop_timer_100ms to set the flashing flags
             // use loop timer to set 3 different flashing flags using modulo operator
@@ -299,29 +313,68 @@ int main()
                 display_fast_flashing_flag = true;
             else
                 display_fast_flashing_flag = false;
-            
+
             if(loop_timer_100ms % NORMAL_FLASH_INTERVAL_100MS >= NORMAL_FLASH_INTERVAL_100MS/2)
                 display_normal_flashing_flag = true;
             else
                 display_normal_flashing_flag = false;
-            
+
             if(loop_timer_100ms % SLOW_FLASH_INTERVAL_100MS >= SLOW_FLASH_INTERVAL_100MS/2)
                 display_slow_flashing_flag = true;
             else
                 display_slow_flashing_flag = false;
 
-            if(loop_timer_100ms % SLOW_FLASH_INTERVAL_100MS == 0) // after loop_timer_100ms reaches max value (SLOW_FLASH_INTERVAL_100MS), reset it to 0
+            // Enter screen saver mode if speed has been 0 for SCREENSAVER_TIMEOUT_100MS
+            // We can reset the timer if the speed is not 0 and when timer is > screensaver timeout then we can enter screensaver mode
+            if (data_pt.speed_kph == 0)
             {
-            loop_timer_100ms = 0;
+                screen_saver_timer_100ms++;
             }
-        }
+            else
+            {
+                screen_saver_timer_100ms = 0;
+            }
+
+            if(screen_saver_timer_100ms >= SCREENSAVER_TIMEOUT_100MS)
+            {
+                // only set last_display_state if we are not already in screensaver mode
+                if(display_state != ScreensaverState)
+                    last_display_state = display_state;
+                display_state = ScreensaverState;
+            }
+
+            // flash the odometer value every ODOMETER_FLASH_INTERVAL_100MS but also not every frame while loop_timer_100ms % ODOMETER_FLASH_INTERVAL_100MS == 0
+            // this way, the odometer flashes every ODOMETER_FLASH_INTERVAL_100MS but it is not flashing every frame
+            if(loop_timer_100ms % ODOMETER_FLASH_INTERVAL_100MS == 0 && odometer_nvflash_flag != 2)
+            {
+                odometer_nvflash_flag = 1;
+            }
+            else
+            {
+                odometer_nvflash_flag = 0;
+            }
+
+            if(odometer_nvflash_flag == 1)
+            {
+                // Set flag to 2 so that it only does flashing once per loop timer and not every frame during the loop timer
+                odometer_nvflash_flag = 2;
+                // Flash odometer value nvsettings
+                nv_settings.data.odometer = data_pt.odometer;
+                nv_settings.store_data();
+
+                // Print out that the odometer is flashing centered in X
+                display.print_centered_x("ODOMETER FLASHED",OLED_HEIGHT/2-1); // you shouldn't normally see this text, mostly for debug in case it flashes too often
+
+            }
+
+        } // End of loop timer stuff
 
 
 
-
-        // TODO: Button reads. 
+        /////////////////////////////////////////////////////////////////
+        // Button reads.
         // Go into bootloader when both buttons pressed for 3 seconds
-        // check if both buttons are pressed. start timer 
+        // check if both buttons are pressed. start timer
         // if button has been pressed again after set time, activate bootloader
 
         pb_right_prev_state = pb_right_state;
@@ -329,8 +382,8 @@ int main()
 
         pb_right_state = debouncer.read(PB_RIGHT_GPIO);
         pb_left_state = debouncer.read(PB_LEFT_GPIO);
-        
-    
+
+
         // if either button is not pressed reset current time
         if (pb_left_state || pb_right_state)
         {
@@ -358,37 +411,61 @@ int main()
             left_button_timer = get_absolute_time();
             display.oled_init();
         }
-        
+
 
         // If left PB was just pressed, change display state
         if (!pb_left_state && pb_left_prev_state)
         {
-            // Wrap around display state
-            display_state = (state)((display_state + LENGTH_STATES - 1) % LENGTH_STATES);
-            // nv_settings.data.disp_brightness -= 16;
-            // display.set_brightness(nv_settings.data.disp_brightness);
-            // nv_settings.store_data();
+            // Change display state only not in ScreensaverState
+            if(display_state != ScreensaverState)
+            {
+                // Wrap around display state
+                display_state = (state)((display_state + LENGTH_USER_STATES - 1) % LENGTH_USER_STATES);
+                // nv_settings.data.disp_brightness -= 16;
+                // display.set_brightness(nv_settings.data.disp_brightness);
+                // nv_settings.store_data();
+            }
+            else // if in screensaver state, reset screensaver timer and exit to last display state
+            {
+                display_state = last_display_state;
+                screen_saver_timer_100ms = 0;
+            }
         }
 
         // If right PB was just pressed, change display state
         if (!pb_right_state && pb_right_prev_state)
         {
-            display_state = (state)((display_state + 1) % LENGTH_STATES);
-            // nv_settings.data.disp_brightness += 16;
-            // display.set_brightness(nv_settings.data.disp_brightness);       
-            // nv_settings.store_data();                 
+            if(display_state != ScreensaverState)
+            {
+                display_state = (state)((display_state + 1) % LENGTH_USER_STATES);
+                // nv_settings.data.disp_brightness += 16;
+                // display.set_brightness(nv_settings.data.disp_brightness);
+                // nv_settings.store_data();
+            }
+            else // if in screensaver state, reset screensaver timer and exit to last display state
+            {
+                display_state = last_display_state;
+                screen_saver_timer_100ms = 0;
+            }
+        } // End of button reads
+
+        // Exit screensaver mode if speed is not 0 and screensaverstate is on
+        if (data_pt.speed_kph != 0 && display_state == ScreensaverState)
+        {
+            display_state = last_display_state;
+            screen_saver_timer_100ms = 0;
         }
 
 
-        // Other calculations 
+        // Other calculations
         // Speed calculation
-    
+
         // Start display stuff
         display.fill(0);
         //display.set_font(press_start_2p); // reset to the small font
         display.set_font(too_simple); // reset to the small font
 
-        
+
         mutex_enter_blocking(&float_mutex);
 
         // Update rolling averages
@@ -405,7 +482,7 @@ int main()
 
         //DEBUG: use buttons to change speed
         if(pb_left_state == 0)
-            data_pt.rpm -= 600.0;   
+            data_pt.rpm -= 600.0;
         if(pb_right_state == 0)
             data_pt.rpm += 600.0;
         #else
@@ -417,7 +494,8 @@ int main()
         switch (display_state)
         {
         case DefaultState:
-            {// TODO:
+            {
+            // TODO:
             // minimalist display with big font and ez to read
             /*
             BATTERY ICON
@@ -426,7 +504,7 @@ int main()
             POWER
             */
 
-           
+
             draw_battery_icon();
 
             // Draw small text stuff
@@ -445,18 +523,18 @@ int main()
             display.draw_vbar(data_pt.adc1_decoded*100, OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH*2, OLED_HEIGHT - 1 - THROTTLE_BAR_HEIGHT, OLED_WIDTH - 1-THROTTLE_BAR_WIDTH, OLED_HEIGHT - 1);
             // Draw Regen Bar
             display.draw_vbar(data_pt.adc2_decoded*100, OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH, OLED_HEIGHT - 1 - THROTTLE_BAR_HEIGHT, OLED_WIDTH - 1, OLED_HEIGHT - 1);
-            
+
 
             // TODO: Display FET/MOTOR temperature and bar graph and change max temp to non hardcode
             #define TEMP_BAR_X 70
             #define TEMP_BAR_HEIGHT 5
             #define FET_TEMP_Y 0
             #define MOTOR_TEMP_Y (FET_TEMP_Y + 5 + 1)
-        
+
             display.set_cursor(24, 0);
             display.print_num("FETS: %2.0fC", data_pt.temp_mos);
             display.draw_hbar(data_pt.temp_mos/110.0 * 100.0,0, TEMP_BAR_X,0,110,TEMP_BAR_HEIGHT);
-            
+
 
             display.set_cursor(24, MOTOR_TEMP_Y);
             display.print_num("MOT: %2.0fC", data_pt.temp_motor);
@@ -465,17 +543,17 @@ int main()
             // Display odometer
             display.set_cursor(24, MOTOR_TEMP_Y + TEMP_BAR_HEIGHT + 1);
             display.print_num("ODO: %2.3f km", data_pt.odometer);
-            
+
 
 
 
             // Draw big text stuff
             // KPH = ERPM / Pole Pairs * wheel diameter(mm)/1000000 * PI * 60 min/hour
-            // 
+            //
             // TODO: lots of temp stuff. Need to get big font for KPH and W letters
-            
+
             display.set_font(future_real);
-           
+
             sprintf(temp_str, "%.0f", data_pt.speed_kph);
             display.get_str_dimensions(temp_str, &temp_str_x, &temp_str_y);
 
@@ -487,12 +565,12 @@ int main()
 
             // Display Power on next row
             sprintf(temp_str, "%.0f", b_cur_avg * b_volts_avg);
-            display.get_str_dimensions(temp_str, &temp_str_x, &temp_str_y);      
-            display.set_cursor(OLED_WIDTH/2 - 1 - (temp_str_x/2), 20 + display.get_font_height() + 1);       
+            display.get_str_dimensions(temp_str, &temp_str_x, &temp_str_y);
+            display.set_cursor(OLED_WIDTH/2 - 1 - (temp_str_x/2), 20 + display.get_font_height() + 1);
             display.print(temp_str);
 
-            
-           
+
+
            // draw temp
            // draw speed
            // draw power
@@ -503,7 +581,7 @@ int main()
         case AnalogSpeedState:
             {// Display battery voltage visually and numerically
             // TODO: Get max Batt V from vesc for auto ranging soc value
-            
+
             #define BATT_TERMINAL_TOP_LEFT_X 4
             #define BATT_TERMINAL_TOP_LEFT_Y 15
             #define BATT_TERMINAL_WIDTH 8
@@ -535,8 +613,8 @@ int main()
 
             // Display Power
             sprintf(temp_str, "%.0fW", b_cur_avg * b_volts_avg);
-            display.get_str_dimensions(temp_str, &temp_str_x, &temp_str_y);      
-            display.set_cursor(OLED_WIDTH/2 - 1 - (temp_str_x/2), TEXT_UNDER_SPEEDO_Y_START + display.get_font_height() + 1);       
+            display.get_str_dimensions(temp_str, &temp_str_x, &temp_str_y);
+            display.set_cursor(OLED_WIDTH/2 - 1 - (temp_str_x/2), TEXT_UNDER_SPEEDO_Y_START + display.get_font_height() + 1);
             display.print(temp_str);
 
 
@@ -561,18 +639,18 @@ int main()
             display.draw_vbar(data_pt.adc1_decoded*100, OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH*2, OLED_HEIGHT - 1 - THROTTLE_BAR_HEIGHT, OLED_WIDTH - 1-THROTTLE_BAR_WIDTH, OLED_HEIGHT - 1);
             // Draw Regen Bar
             display.draw_vbar(data_pt.adc2_decoded*100, OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH, OLED_HEIGHT - 1 - THROTTLE_BAR_HEIGHT, OLED_WIDTH - 1, OLED_HEIGHT - 1);
-            
+
 
             // TODO: Display FET/MOTOR temperature and bar graph and change max temp to non hardcode
             #define TEMP_BAR_X 70
             #define TEMP_BAR_HEIGHT 5
             #define FET_TEMP_Y 0
             #define MOTOR_TEMP_Y (FET_TEMP_Y + 5 + 1)
-        
+
             display.set_cursor(24, 0);
             display.print_num("FETS: %2.0fC", data_pt.temp_mos);
             display.draw_hbar(data_pt.temp_mos/110.0 * 100.0,0, TEMP_BAR_X,0,110,TEMP_BAR_HEIGHT);
-            
+
 
             display.set_cursor(24, MOTOR_TEMP_Y);
             display.print_num("MOT: %2.0fC", data_pt.temp_motor);
@@ -587,7 +665,7 @@ int main()
             //     display.set_cursor(OLED_WIDTH - 10,0);
             //     display.print_num("%2.0", fps);
             //     delayed_by_ms(next_fps_count,1000); // set next fps count timer
-            //     fps = 0; // 
+            //     fps = 0; //
             // }
             break;
             }
@@ -599,32 +677,10 @@ int main()
             //process_speed_calc();
             display.set_cursor(0,0);
 
-            // change the strings on the following lines to be uppercase
-            if(display_fast_flashing_flag)
-            {
-                 display.print_num("KPH:%f\n",data_pt.speed_kph);
-
-            }
-            else
-            {
-                display.print("\n");
-            }
-            if(display_normal_flashing_flag)
-            {
-                display.print_num("ERPM:%f\n",data_pt.rpm);
-            }
-            else
-            {
-                display.print("\n");
-            }
-            if(display_slow_flashing_flag)
-            {
-                display.print_num("ODO:%f\n",data_pt.odometer);
-            }
-            else
-            {
-                display.print("\n");
-            }
+            // Print DEBUG info
+            display.print_num("KPH:%f\n",data_pt.speed_kph);
+            display.print_num("ERPM:%f\n",data_pt.rpm);
+            display.print_num("ODO:%f\n",data_pt.odometer);
             display.print_num("PREV_KPH:%f\n",prev_kph);
             display.print_num("AVG_SPEED:%f\n",average_speed);
             display.print_num("TIME_BTW_ODO_US:%d\n",(int32_t)time_between_odo_samples_us);
@@ -632,15 +688,40 @@ int main()
 
             break;
             }
+        case StatsState:
+            {
+            // TODO: stats stuff
+            // show odometer, whr/km, whr used, whr charged,
+            /* todo: stats
+            -trip
+            -average speed
+            -max speed
+            -odometer
+            -watt hours per trip km
+            -trip time
+            -battery IR
+            
+            */
+            display.set_cursor(0,0);
+            display.print_num("ODO:%.3f\n",data_pt.odometer);
+            display.print_num("WHR/KM:%.2f\n",data_pt.watt_hours/data_pt.odometer); // TODO: Can change to based on trip km later
+            display.print_num("WHR USED:%.1f\n",data_pt.watt_hours);
+            display.print_num("WHR CHARGED:%.1f\n",data_pt.watt_hours_charged);
+
+            break;
+            }
+
+
         case ScreensaverState:
-            {// Do screensaver stuff
+            {
+            // Do screensaver stuff
             // Create a mode with minimal information that moves around to avoid burn in
             // show battery volatage and cell voltage with a bar graph
-            // every minute - change positions of things
+            // every SCREENSAVER_MOVE_INTERVAL_100MS - change positions of things
 
+            
             display.set_font(future_real); // set to big font
 
-            // 
             // Get height of both lines of text and bar graph
             #define BATT_BAR_WIDTH 60
             #define BATT_BAR_HEIGHT 20
@@ -664,62 +745,96 @@ int main()
             // set width to the max of the two
             bounding_box_width = (temp_str_x > bounding_box_width) ? temp_str_x : bounding_box_width;
 
-            // Now that we have the bounding box, adjust the position slightly with each update
+    
             static uint8_t bounding_box_x = 0;
             static uint8_t bounding_box_y = 0;
             static uint8_t bounding_box_x_dir = 1; // 1 = right, 0 = left
             static uint8_t bounding_box_y_dir = 1; // 1 = down, 0 = up
+            static uint8_t move_screensaver_flag = 0;
 
-            // Move the bounding box around
-            if(bounding_box_x_dir)
+
+            // Reuse screen_saver_timer_100ms for the move interval timer
+            // Move Bounding box around every SCREENSAVER_MOVE_INTERVAL_100MS
+            // set move_screensaver_flag to 1 to move after the interval
+
+            // Set the move_screensaver_flag only when the timer is at the interval but not every frame during that time
+            
+            // interval is up, set flag to move but only if it's not already set previously this interval
+            if(screen_saver_timer_100ms % SCREENSAVER_MOVE_INTERVAL_100MS == 0 && move_screensaver_flag != 2)
             {
-                bounding_box_x++;
-                if(bounding_box_x >= (OLED_WIDTH - bounding_box_width))
-                {
-                    bounding_box_x_dir = 0;
-                }
+                move_screensaver_flag = 1;
             }
-            else
+            else if(screen_saver_timer_100ms % SCREENSAVER_MOVE_INTERVAL_100MS != 0)
             {
-                bounding_box_x--;
-                if(bounding_box_x <= 0)
-                {
-                    bounding_box_x_dir = 1;
-                }
+                move_screensaver_flag = 0;
             }
 
-            if(bounding_box_y_dir)
+            if(move_screensaver_flag == 1)
             {
-                bounding_box_y++;
-                if(bounding_box_y >= (OLED_HEIGHT - bounding_box_height))
+                move_screensaver_flag = 2;
+                // Move the bounding box around
+                if(bounding_box_x_dir)
                 {
-                    bounding_box_y_dir = 0;
+                    bounding_box_x++;
+                    if(bounding_box_x >= (OLED_WIDTH - 1 - bounding_box_width))
+                    {
+                        bounding_box_x_dir = 0;
+                    }
                 }
-            }
-            else
-            {
-                bounding_box_y--;
-                if(bounding_box_y <= 0)
+                else
                 {
-                    bounding_box_y_dir = 1;
+                    bounding_box_x--;
+                    if(bounding_box_x <= 0)
+                    {
+                        bounding_box_x_dir = 1;
+                    }
+                }
+
+                if(bounding_box_y_dir)
+                {
+                    bounding_box_y++;
+                    if(bounding_box_y >= (OLED_HEIGHT - 1 - bounding_box_height))
+                    {
+                        bounding_box_y_dir = 0;
+                    }
+                }
+                else
+                {
+                    bounding_box_y--;
+                    if(bounding_box_y <= 0)
+                    {
+                        bounding_box_y_dir = 1;
+                    }
                 }
             }
 
             // Draw the bounding box
             display.draw_box(bounding_box_x, bounding_box_y, bounding_box_x + bounding_box_width, bounding_box_y + bounding_box_height);
 
-            // Draw the text
-            display.set_cursor(bounding_box_x, bounding_box_y);
-            display.set_font(future_real); // set to big font
-            display.print_num("%.1f", data_pt.v_in);
-            display.set_cursor(bounding_box_x, bounding_box_y + display.get_font_height());
-            display.set_font(too_simple); // set to small font
+            // Draw the batt and cell voltage text
+            // TODO: center the text in the bounding box and do get_str_dimensions in a nicer way
+            uint8_t bounding_box_text_y = bounding_box_y; // var for keeping text y cursor position
 
-            // Draw the bar graph
-            display.draw_hbar(b_soc,0,bounding_box_x,bounding_box_y,bounding_box_x + BATT_BAR_WIDTH,bounding_box_y + BATT_BAR_HEIGHT);
-            
-            break;
+            display.set_font(future_real); // set to big font
+            sprintf(temp_str, "%.1f", data_pt.v_in);
+            display.get_str_dimensions(temp_str, &temp_str_x, &temp_str_y);
+            display.set_cursor(bounding_box_x + ((bounding_box_width - temp_str_x) / 2), bounding_box_text_y);
+            display.print_num(temp_str, data_pt.v_in);
+            bounding_box_text_y += temp_str_y; // move the text cursor down for next line
+
+            // Change to small font
+            display.set_font(too_simple);
+            sprintf(temp_str, "%.2f CELL V", data_pt.v_in / cells_in_series);
+            display.get_str_dimensions(temp_str, &temp_str_x, &temp_str_y);
+
+            display.set_cursor(bounding_box_x + ((bounding_box_width - temp_str_x) / 2), bounding_box_text_y);
+            display.print_num(temp_str, data_pt.v_in / cells_in_series);
+            bounding_box_text_y += temp_str_y;  // move the text cursor down for next line
+
+            // Draw the bar graph after the lines of text
+            display.draw_hbar(b_soc,0,bounding_box_x,bounding_box_text_y,bounding_box_x + BATT_BAR_WIDTH,bounding_box_text_y + BATT_BAR_HEIGHT);
             }
+            break;
         }
 
         mutex_exit(&float_mutex);
@@ -732,14 +847,14 @@ int main()
 
     //     display.set_cursor(0,0);
 
-        
+
     //     mutex_enter_blocking(&float_mutex);
 
 
     //     // display.print_num(" VIN: %.1fV\n", data_pt.v_in);
     //     // display.print_num("TFET: %.1fC\n", data_pt.temp_mos);
-    //     // display.print_num("TMOT: %.1fC\n", data_pt.temp_motor);        
-    //     // display.print_num("ERPM: %d\n", data_pt.rpm);  
+    //     // display.print_num("TMOT: %.1fC\n", data_pt.temp_motor);
+    //     // display.print_num("ERPM: %d\n", data_pt.rpm);
     //     //display.print_num("ADC1_RAW: %.1fV\n", adc_v1);
     //     //display.print_num("ADC1_DEC: %.3f\n", data_pt.adc1_decoded);
     //     //display.print_num("ADC2_RAW: %.1fV\n", adc_v2);
@@ -748,7 +863,7 @@ int main()
     //     display.draw_vbar(data_pt.adc1_decoded*100, 4, 20, 8, 60);
 
     //     display.draw_hbar(data_pt.adc1_decoded*100, 1, 20, 20, 60, 24);
-    //     display.draw_hbar(data_pt.adc1_decoded*100, 0, 70, 20, 110, 24);        
+    //     display.draw_hbar(data_pt.adc1_decoded*100, 0, 70, 20, 110, 24);
 
     //     display.print_num("BRIGHTNESS: %d\n", nv_settings.data.disp_brightness);
     //     display.print_num("FLASH PG=%d", nv_settings.page_id);
@@ -766,8 +881,8 @@ int main()
     //     //     }
 
     //     //     sprintf(hex_str, "%.2X ", get_values_response[idx]);
-    //     //     display.print(hex_str);            
-    //     // }        
+    //     //     display.print(hex_str);
+    //     // }
 
     //     mutex_exit(&float_mutex);
 
@@ -800,14 +915,14 @@ int main()
 
 void draw_battery_icon()
 {
-   
+
 
     display.draw_vbar(b_soc, 0, 18, 15, OLED_HEIGHT - 1); // Battery icon outline
     display.fill_rect(0, BATT_TERMINAL_TOP_LEFT_X, BATT_TERMINAL_TOP_LEFT_Y, BATT_TERMINAL_TOP_LEFT_X + BATT_TERMINAL_WIDTH, BATT_TERMINAL_TOP_LEFT_Y + BATT_TERMINAL_HEIGHT); // Draw block to represent battery terminal
 
     // Batt Voltage and Current text
     display.set_cursor(2, 0);
-    if(display_normal_flashing_flag)
+    if(display_slow_flashing_flag)
     {
         // Display cell voltage (battery voltage / number of cells)
         display.print_num("%.1fV", b_volts_avg/cells_in_series);
@@ -897,7 +1012,7 @@ void core1_entry()
 
     /* Handle any config reads first */
     // Build Packet for config reads
-    /* TODO: Get 
+    /* TODO: Get
         wheel diameter
         motor poles
         battery voltage
@@ -942,7 +1057,7 @@ void core1_entry()
         // Wait for the response packet and process it
         vesc_connected = receive_packet(&vesc_comm);
 
-        
+
         // Prepare COMM_GET_DECODED_ADC packet
         packet_init(uart0_write, process_data, &vesc_comm);
         memset(send_payload, 0, sizeof(send_payload));
@@ -953,10 +1068,10 @@ void core1_entry()
         packet_send_packet(send_payload, send_pl_idx, &vesc_comm);
 
         // Reset packet that was sent so it can be reused
-        packet_reset(&vesc_comm);    
+        packet_reset(&vesc_comm);
 
         // Wait for the response packet and process it
-        receive_packet(&vesc_comm);      
+        receive_packet(&vesc_comm);
 
 
         ///////////// Logging /////////////
@@ -976,8 +1091,8 @@ void core1_entry()
 
             gpio_put(DEBUG_GPIO, 0);
             result = create_log_file();
-            gpio_put(DEBUG_GPIO, 1);        
-            
+            gpio_put(DEBUG_GPIO, 1);
+
             DBG_PRINT("create_log_file() returned with %d: %s\n", result, FRESULT_str(result));
             sleep_ms(1);
 
@@ -986,9 +1101,9 @@ void core1_entry()
         {
             gpio_put(DEBUG_GPIO, 0);
             result = append_data_pt();
-            gpio_put(DEBUG_GPIO, 1);          
+            gpio_put(DEBUG_GPIO, 1);
 
-            DBG_PRINT("append_data_pt() returned with %d: %s\n", result, FRESULT_str(result));            
+            DBG_PRINT("append_data_pt() returned with %d: %s\n", result, FRESULT_str(result));
         }
 
 
