@@ -127,6 +127,8 @@ float average_speed = 0;
 float distance_travelled = 0;
 float prev_kph = 0;
 float trip_odometer = 0; // trip odometer resets every power cycle
+float prev_watt_hours_used = 0;
+float prev_watt_hours_charged = 0;
 
 
 int64_t time_between_odo_samples_us = 0;
@@ -789,8 +791,9 @@ int main()
             display.set_cursor(0,0);
             display.print_num("ODO:%.3f\n",data_pt.odometer);
             // add in total watt hours used and charged and whr/km
-            display.print_num("WHR/KM:%.2f\n",(data_pt.total_watt_hours_used-data_pt.total_watt_hours_charged)/data_pt.odometer);
-            display.print_num("WHR CHARGED:%.1f\n",data_pt.total_watt_hours_charged);
+            display.print_num("WHR/KM:%.3f\n",(data_pt.total_watt_hours_used-data_pt.total_watt_hours_charged)/data_pt.odometer);
+            display.print_num("WHR USED:%.3f\n",data_pt.total_watt_hours_used);
+            display.print_num("WHR CHARGED:%.3f\n",data_pt.total_watt_hours_charged);
 
             // Print out money saved @ 13L/100km on car and 1.90/L hardcoded for now
             display.print_num("GAS COST:$%.2f\n", (float)(data_pt.odometer/(float)(100.0) * 13 * (float)(1.90)));
@@ -1095,13 +1098,18 @@ void process_speed_calc()
     data_pt.odometer += distance_travelled/1000000.0; // convert distance_travelled to km and add to odo
     // double check proper math is done and not truncated due to data types
 
-    // Update total whr/km
-    
+    // Update watt hours stuff
+    data_pt.total_watt_hours_used += data_pt.watt_hours - prev_watt_hours_used; 
+    data_pt.total_watt_hours_charged += data_pt.watt_hours_charged - prev_watt_hours_charged;
+
     // Update trip odometer
     trip_odometer += distance_travelled/1000000.0;
 
     // Update prev_kph to current speed
     prev_kph = data_pt.speed_kph;
+    prev_watt_hours_used = data_pt.watt_hours;
+    prev_watt_hours_charged = data_pt.watt_hours_charged;
+
 }
 
 
