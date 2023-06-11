@@ -52,14 +52,20 @@
 - clean up old commented out code
 - adjust rolling average for power/speed to be faster response
 - [x] add odometer
-- []save odometer to flash
+- [x]save odometer to flash
+- [x] add trip odometer
+- [x] add whr/km for trip
 - [x] add Display state button changes
 - [x]add screensave state
     [x]- auto go into screen saver
     [x]- auto leave screen saver when speed changes or button pressed
 - [x]whr/km
 - [x]whr used
+- [x] total whr used/charged/whr/km
+- on default screen
+    - [] Make temp bars just lines instead of hbars- or swap them with throt/regen bars better readability
 - add settings page
+    - reset nvflash
 - add better soc lookup table for li ion battery
 
 */
@@ -88,12 +94,14 @@
 //#define SCREENSAVER_TIMEOUT_100MS (5*10) // TESTING: 5 seconds
 #define SCREENSAVER_TIMEOUT_100MS (5*60*10) // 5*60*10 * 100ms = 5 minutes
 #define SCREENSAVER_MOVE_INTERVAL_100MS (5*10) // 5 seconds
-//#define ODOMETER_FLASH_INTERVAL_100MS (20*10) // 20 seconds testing
+//#define ODOMETER_FLASH_INTERVAL_100MS (10*10) // 10 seconds testing
 #define ODOMETER_FLASH_INTERVAL_100MS (5*60*10) // 5 minutes
+#define ODOMETER_CHANGED_AMOUNT 0.2         // Amount odometer must change before it can be saved to flash
 
 // function prototypes
 void draw_battery_icon();
 void process_speed_calc();
+void get_time_str(char * time_str);
 
 void core1_entry();
 
@@ -114,11 +122,13 @@ float adc_v1, adc_v2;
 float b_cur_avg = 0;
 float b_volts_avg = 0;
 float m_erpm_avg = 0;
-float prev_kph_for_odometer = 0;
 float fps = 0;
 float average_speed = 0;
 float distance_travelled = 0;
 float prev_kph = 0;
+float trip_odometer = 0; // trip odometer resets every power cycle
+
+
 int64_t time_between_odo_samples_us = 0;
 uint8_t b_soc = 0;
 uint8_t cells_in_series = 13;   // Hardcoded for now
@@ -139,7 +149,7 @@ int main()
 
     stdio_init_all();
     time_init();
-
+    
     // Set Pico DC/DC converter to PWM mode to reduce noise at light load
     gpio_put(23, 1);
 
@@ -171,7 +181,8 @@ int main()
 
     // Set any initial values from nvsettings
     data_pt.odometer = nv_settings.data.odometer;
-    // whr/km?
+    data_pt.total_watt_hours_used = nv_settings.data.total_watt_hours_used;
+    data_pt.total_watt_hours_charged = nv_settings.data.total_watt_hours_charged;
 
     // oled init
     display.oled_init();
@@ -238,7 +249,6 @@ int main()
     multicore_launch_core1(core1_entry);
 
 
-
     // main() initilizing
     // Display Setup
 
@@ -268,11 +278,12 @@ int main()
     uint32_t screen_saver_timer_100ms = 0; // 100ms timer for screensaver
 
     // Flags
-    uint8_t odometer_nvflash_flag = 0;
+    uint8_t odometer_nvflash_flag = 0;  // Flag to indicate that the odometer needs to be saved to flash
+    uint8_t odometer_changed_flag = 0;  // Flag to indicate that the odometer has changed more than ODOMETER_CHANGED_AMOUNT
 
     // LENGTH_USER_STATES is the number of user states, not including the non user states such as the screensaver
     // Add new states before LENGTH_USER_STATES
-    enum state {DefaultState, AnalogSpeedState,DebugState, StatsState, LENGTH_USER_STATES, ScreensaverState};
+    enum state {DefaultState, AnalogSpeedState, DebugState, StatsState, LENGTH_USER_STATES, ScreensaverState};
     state display_state = DefaultState;
     state last_display_state = DefaultState;
 
@@ -343,9 +354,29 @@ int main()
                 display_state = ScreensaverState;
             }
 
-            // flash the odometer value every ODOMETER_FLASH_INTERVAL_100MS but also not every frame while loop_timer_100ms % ODOMETER_FLASH_INTERVAL_100MS == 0
+            // Flash the odometer value every ODOMETER_FLASH_INTERVAL_100MS but also not every frame while loop_timer_100ms % ODOMETER_FLASH_INTERVAL_100MS == 0
             // this way, the odometer flashes every ODOMETER_FLASH_INTERVAL_100MS but it is not flashing every frame
-            if(loop_timer_100ms % ODOMETER_FLASH_INTERVAL_100MS == 0 && odometer_nvflash_flag != 2)
+            
+            // Check if odometer has changed more than ODOMETER_CHANGED_AMOUNT
+            mutex_enter_blocking(&float_mutex);
+            if(data_pt.odometer - nv_settings.data.odometer >= ODOMETER_CHANGED_AMOUNT)
+            {
+                odometer_changed_flag = 1;
+            }
+            else
+            {
+                odometer_changed_flag = 0;
+            }
+            mutex_exit(&float_mutex);
+            
+            // Flash odometer value nvsettings when change is greater than ODOMETER_CHANGED_AMOUNT and ODOMETER_FLASH_INTERVAL_100MS has passed
+            
+            if(loop_timer_100ms % ODOMETER_FLASH_INTERVAL_100MS == 0 && odometer_changed_flag == 1 && odometer_nvflash_flag != 2 )
+            {
+                odometer_nvflash_flag = 1;
+            }
+            // else if speed is 0 and odometer has changed and odometer has not been flashed yet
+            else if(data_pt.speed_kph == 0 && odometer_changed_flag == 1 && odometer_nvflash_flag != 2)
             {
                 odometer_nvflash_flag = 1;
             }
@@ -360,11 +391,10 @@ int main()
                 odometer_nvflash_flag = 2;
                 // Flash odometer value nvsettings
                 nv_settings.data.odometer = data_pt.odometer;
+                // Also flash whr used/charged
+                nv_settings.data.total_watt_hours_used = data_pt.total_watt_hours_used;
+                nv_settings.data.total_watt_hours_charged = data_pt.total_watt_hours_charged;
                 nv_settings.store_data();
-
-                // Print out that the odometer is flashing centered in X
-                display.print_centered_x("ODOMETER FLASHED",OLED_HEIGHT/2-1); // you shouldn't normally see this text, mostly for debug in case it flashes too often
-
             }
 
         } // End of loop timer stuff
@@ -465,6 +495,10 @@ int main()
         //display.set_font(press_start_2p); // reset to the small font
         display.set_font(too_simple); // reset to the small font
 
+        if(odometer_nvflash_flag == 2) // If odometer is about to be flashed
+            // Print out that the odometer is flashing centered in X
+            display.print_centered_x("ODOMETER FLASHED",OLED_HEIGHT/2-1); // you shouldn't normally see this text, mostly for debug in case it flashes too often
+
 
         mutex_enter_blocking(&float_mutex);
 
@@ -478,13 +512,17 @@ int main()
         #ifdef DEBUG
 
         // Set to Debug state
-        display_state = DebugState;
+        //display_state = DebugState;
 
         //DEBUG: use buttons to change speed
         if(pb_left_state == 0)
             data_pt.rpm -= 600.0;
         if(pb_right_state == 0)
             data_pt.rpm += 600.0;
+        
+        // Process speed in debug because if vesc is not connected (because you are debugging), it will not process speed
+        process_speed_calc();
+
         #else
         m_erpm_avg = (1 - ROLLING_AVG_RATIO) * m_erpm_avg + ROLLING_AVG_RATIO * abs(data_pt.rpm);
         #endif
@@ -526,25 +564,81 @@ int main()
 
 
             // TODO: Display FET/MOTOR temperature and bar graph and change max temp to non hardcode
-            #define TEMP_BAR_X 70
-            #define TEMP_BAR_HEIGHT 5
-            #define FET_TEMP_Y 0
-            #define MOTOR_TEMP_Y (FET_TEMP_Y + 5 + 1)
+            
+            #define TEMP_BAR_X 70       // x position of temp bar graph
+            #define TEMP_BAR_HEIGHT 2   // height of temp bar graph
+            #define FET_TEMP_Y 0        // y position of FET temp bar graph
+            #define MOTOR_TEMP_Y (FET_TEMP_Y + TEMP_BAR_HEIGHT) // overlap one border pixel
 
-            display.set_cursor(24, 0);
-            display.print_num("FETS: %2.0fC", data_pt.temp_mos);
-            display.draw_hbar(data_pt.temp_mos/110.0 * 100.0,0, TEMP_BAR_X,0,110,TEMP_BAR_HEIGHT);
+            // Combine FET and Motor temp into one bar graph
+            #define TEMP_TEXT_X 24
+            display.set_cursor(TEMP_TEXT_X, 0);
 
+            // Print out Fet and flash it if greater than 100C
+            if(data_pt.temp_mos >= 100.0)
+            {
+                if(display_normal_flashing_flag)
+                {
+                    display.print_num("F: %2.0fC", data_pt.temp_mos);
+                }
+            }
+            else
+            {
+                display.print_num("F: %2.0fC", data_pt.temp_mos);
+            }
 
-            display.set_cursor(24, MOTOR_TEMP_Y);
-            display.print_num("MOT: %2.0fC", data_pt.temp_motor);
-            display.draw_hbar(data_pt.temp_motor/110.0 * 100.0,0, TEMP_BAR_X,MOTOR_TEMP_Y,110,MOTOR_TEMP_Y + TEMP_BAR_HEIGHT);
+            // Print out Motor temp and flash it if greater than 100C
+            if(data_pt.temp_motor >= 100.0)
+            {
+                if(display_normal_flashing_flag)
+                {
+                    display.print_num(" M: %3.0fC", data_pt.temp_motor);
+                }
+            }
+            else
+            {
+                display.print_num(" M: %3.0fC", data_pt.temp_motor);
+            }
+
+            // Draw FET and Motor temp bar graphs
+            // Flash the bar graph if equal to or greater than 100C
+            if(data_pt.temp_mos >= 100.0)
+            {
+                if(display_normal_flashing_flag)
+                {
+                    display.draw_hbar(data_pt.temp_mos/110.0 * 100.0,0, TEMP_BAR_X,FET_TEMP_Y,110,TEMP_BAR_HEIGHT);
+                }
+            }
+            else
+            {
+                display.draw_hbar(data_pt.temp_mos/110.0 * 100.0,0, TEMP_BAR_X,FET_TEMP_Y,110,TEMP_BAR_HEIGHT);
+            }
+
+            if(data_pt.temp_motor >= 100.0) // TESTING: always flash motor temp
+            {
+                if(display_normal_flashing_flag)
+                {
+                    display.draw_hbar(data_pt.temp_motor/110.0 * 100.0,0, TEMP_BAR_X,MOTOR_TEMP_Y,110,MOTOR_TEMP_Y + TEMP_BAR_HEIGHT);
+                }
+            }
+            else
+            {
+                display.draw_hbar(data_pt.temp_motor/110.0 * 100.0,0, TEMP_BAR_X,MOTOR_TEMP_Y,110,MOTOR_TEMP_Y + TEMP_BAR_HEIGHT);
+            }
 
             // Display odometer
-            display.set_cursor(24, MOTOR_TEMP_Y + TEMP_BAR_HEIGHT + 1);
-            display.print_num("ODO: %2.3f km", data_pt.odometer);
+            display.set_cursor(TEMP_TEXT_X, MOTOR_TEMP_Y + display.get_font_height());
+            display.print_num("ODO: %2.1f km", data_pt.odometer);
 
+            // Display trip odometer
+            display.set_cursor(TEMP_TEXT_X, MOTOR_TEMP_Y + display.get_font_height()*2);
+            display.print_num("TRIP: %2.1f km", trip_odometer);
 
+            // Display whr/km next to trip odometer
+            display.get_str_dimensions("TRIP: %2.1f km", &temp_str_x, &temp_str_y);
+            display.set_cursor(TEMP_TEXT_X + temp_str_x, MOTOR_TEMP_Y + display.get_font_height()*2);
+            display.print_num("%2.1f whr/km", data_pt.watt_hours/trip_odometer);
+            
 
 
             // Draw big text stuff
@@ -617,14 +711,7 @@ int main()
             display.set_cursor(OLED_WIDTH/2 - 1 - (temp_str_x/2), TEXT_UNDER_SPEEDO_Y_START + display.get_font_height() + 1);
             display.print(temp_str);
 
-
-            // Display watt-hours charged numerically
-            // TODO Watt hours used instead
-            // display.fill_rect(1, 18, 52, 117, OLED_HEIGHT - 1);  // Blank out area where text will draw
-            // display.set_cursor(19, 54);
-            // display.print_num("WATT-HRS GENERATED: %.1f", data_pt.watt_hours_charged);
-
-            // // TODO: Display throttle intensity visually (ADC1) next to regen (ADC2)
+            // Display throttle intensity visually (ADC1) next to regen (ADC2)
             #define THROTTLE_BAR_WIDTH 5
             #define THROTTLE_BAR_HEIGHT 20
 
@@ -693,20 +780,31 @@ int main()
             // TODO: stats stuff
             // show odometer, whr/km, whr used, whr charged,
             /* todo: stats
-            -trip
+            - tot whr/km
             -average speed
             -max speed
-            -odometer
-            -watt hours per trip km
-            -trip time
             -battery IR
             
             */
             display.set_cursor(0,0);
             display.print_num("ODO:%.3f\n",data_pt.odometer);
-            display.print_num("WHR/KM:%.2f\n",data_pt.watt_hours/data_pt.odometer); // TODO: Can change to based on trip km later
-            display.print_num("WHR USED:%.1f\n",data_pt.watt_hours);
-            display.print_num("WHR CHARGED:%.1f\n",data_pt.watt_hours_charged);
+            // add in total watt hours used and charged and whr/km
+            display.print_num("WHR/KM:%.2f\n",(data_pt.total_watt_hours_used-data_pt.total_watt_hours_charged)/data_pt.odometer);
+            display.print_num("WHR CHARGED:%.1f\n",data_pt.total_watt_hours_charged);
+
+            // Print out money saved @ 13L/100km on car and 1.90/L hardcoded for now
+            display.print_num("GAS COST:$%.2f\n", (float)(data_pt.odometer/(float)(100.0) * 13 * (float)(1.90)));
+
+            // Trip stats
+            display.print("TRIP TIME:");
+            get_time_str(temp_str);
+            display.print(temp_str);
+            display.print("\n\r");
+
+            display.print_num("TRIP ODO:%.3f\n",trip_odometer);
+            display.print_num("TRIP WHR/KM:%.2f\n",data_pt.watt_hours/trip_odometer);
+            display.print_num("TRIP WHR USED:%.1f\n",data_pt.watt_hours);
+            display.print_num("TRIP WHR CHARGED:%.1f\n",data_pt.watt_hours_charged);
 
             break;
             }
@@ -965,6 +1063,22 @@ uint8_t receive_packet(PACKET_STATE_t *rx_packet)
 
 void process_data(uint8_t *data, size_t len);
 
+// Get absolute time from pico and convert to str containing hh:mm:ss for trip time
+// Use Buffer of at least [15]
+void get_time_str(char * time_str)
+{
+    // Get time from 
+    uint64_t time_s = to_us_since_boot(get_absolute_time()) / 1000000;
+    // Convert to hours mins seconds
+    uint16_t hours = time_s/3600;
+    uint8_t leftover_secs = time_s % 3600;
+    uint8_t mins = leftover_secs / 60;
+    uint8_t secs = leftover_secs % 60;
+    // Store in time_str
+    sprintf(time_str, "%02d:%02d:%02d", hours, mins, secs);
+
+}
+
 
 // Do the speed and odometer calculation here
 void process_speed_calc()
@@ -980,6 +1094,11 @@ void process_speed_calc()
     distance_travelled = average_speed * time_between_odo_samples_us/(3600); // distance travelled as mm
     data_pt.odometer += distance_travelled/1000000.0; // convert distance_travelled to km and add to odo
     // double check proper math is done and not truncated due to data types
+
+    // Update total whr/km
+    
+    // Update trip odometer
+    trip_odometer += distance_travelled/1000000.0;
 
     // Update prev_kph to current speed
     prev_kph = data_pt.speed_kph;

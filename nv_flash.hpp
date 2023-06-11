@@ -19,6 +19,8 @@ typedef struct
     uint8_t disp_brightness = 0;
     uint32_t log_num = 0;
     float odometer = 0.0;
+    float total_watt_hours_used = 0.0;
+    float total_watt_hours_charged = 0.0;
 } nv_flash_struct;
 
 
@@ -31,6 +33,7 @@ class nv_flash_storage
         nv_flash_struct data;
         nv_flash_storage(mutex_t *flash_write_lock);
         void store_data();
+        void reset_data();
         uint8_t block_id;
         int8_t page_id;
 

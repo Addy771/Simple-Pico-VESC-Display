@@ -108,3 +108,15 @@ void nv_flash_storage::store_data()
 
 }
 
+/// @brief Reset the data structure to default values and write to flash
+void nv_flash_storage::reset_data()
+{
+    mutex_enter_blocking(write_lock);   // Enter mutex to stop other core from doing flash reads
+    uint saved_interrupts;
+    saved_interrupts = save_and_disable_interrupts(); // Disable interrupts to make sure other core doesn't run any code
+
+    flash_range_erase(FLASH_TARGET_OFFSET, FLASH_SECTOR_SIZE);
+
+    restore_interrupts(saved_interrupts);
+    mutex_exit(write_lock);     // Release lock now that flash erase/write is complete
+}

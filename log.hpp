@@ -27,6 +27,8 @@ typedef struct
     float p_in;
     float speed_kph;
     float odometer;
+    float total_watt_hours_used;
+    float total_watt_hours_charged;
 
     // values from vesc
     int ms_today;       // Time of day in ms

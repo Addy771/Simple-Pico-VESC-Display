@@ -21,12 +21,12 @@ extern Debounce debouncer;
 
 uint8_t sd_status = SD_NOT_PRESENT;
 
-// When adding another value, update append_data_pt() and log.hpp as well
+// When adding another value, update append_data_pt(), log.hpp, and nv_flash.hpp (if saved to nvflash) as well
 const char csv_head[] = "ms_today,input_voltage,temp_mos_max,temp_mos_1,temp_mos_2,temp_mos_3,"
                         "temp_motor,current_motor,current_in,d_axis_current,q_axis_current,"
                         "erpm,duty_cycle,amp_hours_used,amp_hours_charged,watt_hours_used,"
                         "watt_hours_charged,tachometer,tachometer_abs,encoder_position,fault_code,"
-                        "vesc_id,d_axis_voltage,q_axis_voltage,input_power,speed_kph,adc1_decoded,adc2_decoded,odometer\n";
+                        "vesc_id,d_axis_voltage,q_axis_voltage,input_power,speed_kph,adc1_decoded,adc2_decoded,odometer,total_watt_hours_used,total_watt_hours_charged\n";
 
 char log_filename[30] = "";
 
@@ -307,7 +307,7 @@ FRESULT append_data_pt()
     f_printf(&log_fil, "%f,%f,%f,%f,%f,", data_pt.temp_motor, data_pt.current_motor, data_pt.current_in, data_pt.id, data_pt.iq);
     f_printf(&log_fil, "%f,%f,%f,%f,%f,", data_pt.rpm, data_pt.duty_now, data_pt.amp_hours, data_pt.amp_hours_charged, data_pt.watt_hours);
     f_printf(&log_fil, "%f,%d,%d,%f,%d,", data_pt.watt_hours_charged, data_pt.tachometer, data_pt.tachometer_abs, data_pt.position, data_pt.fault_code);
-    bytes_written = f_printf(&log_fil, "%d,%f,%f,%f,%f,%f,%f,%f\n", data_pt.vesc_id, data_pt.vd, data_pt.vq, data_pt.p_in, data_pt.speed_kph, data_pt.adc1_decoded, data_pt.adc2_decoded,data_pt.odometer);
+    bytes_written = f_printf(&log_fil, "%d,%f,%f,%f,%f,%f,%f,%f,%f,%f\n", data_pt.vesc_id, data_pt.vd, data_pt.vq, data_pt.p_in, data_pt.speed_kph, data_pt.adc1_decoded, data_pt.adc2_decoded,data_pt.odometer,data_pt.total_watt_hours_used,data_pt.total_watt_hours_charged);
 
     if (bytes_written < 0)
     {
