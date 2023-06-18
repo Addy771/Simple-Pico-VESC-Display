@@ -1039,7 +1039,7 @@ void draw_battery_icon()
 }
 
 
-void uart0_write(uint8_t * src, size_t len)
+void uart0_write(uint8_t *src, size_t len)
 {
     uart_write_blocking(uart0, src, len);
 }
@@ -1068,13 +1068,13 @@ void process_data(uint8_t *data, size_t len);
 
 // Get absolute time from pico and convert to str containing hh:mm:ss for trip time
 // Use Buffer of at least [15]
-void get_time_str(char * time_str)
+void get_time_str(char *time_str)
 {
     // Get time from 
     uint64_t time_s = to_us_since_boot(get_absolute_time()) / 1000000;
     // Convert to hours mins seconds
     uint16_t hours = time_s/3600;
-    uint8_t leftover_secs = time_s % 3600;
+    uint16_t leftover_secs = time_s % 3600;
     uint8_t mins = leftover_secs / 60;
     uint8_t secs = leftover_secs % 60;
     // Store in time_str
