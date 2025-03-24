@@ -38,6 +38,10 @@
 #include "pico-oled/font/Retron2000.h"
 #include "pico-oled/font/future_real.h"
 
+//#include "u8g2/cppsrc/U8g2lib.h"
+#include <u8g2.h>
+#include "u8x8_interface.hpp"
+
 /*  TODO: 
 - add a function in pico-led library to blank out the area where text would be
 - improve analog gauge to have adjustable needle len
@@ -82,6 +86,10 @@ void draw_battery_icon();
 
 void core1_entry();
 
+
+u8g2_t u8g2;
+
+
 uint32_t real_baudrate = 0;
 uint8_t response_code = 0;
 uint8_t vesc_connected = 0;
@@ -108,6 +116,8 @@ auto_init_mutex(float_mutex);
 pico_oled display(OLED_SSD1309, /*i2c_address=*/ 0x3C, /*screen_width=*/ 128, /*screen_height=*/ 64, /*reset_gpio=*/ 15); 
 
 Debounce debouncer;
+
+
 
 
 // Core 0
@@ -146,6 +156,17 @@ int main()
     pb_left_prev_state = pb_left_state = debouncer.read(PB_LEFT_GPIO);
     pb_right_prev_state = pb_right_state = debouncer.read(PB_RIGHT_GPIO);
     
+
+    // U8G2 init
+    u8g2_Setup_st75256_jlx256128_f(&u8g2, U8G2_R0, u8x8_byte_3wire_sw_spi, u8x8_gpio_and_delay_pico);
+    u8g2_InitDisplay(&u8g2);    // Init sequence, ends with display in sleep mode
+    u8g2_SetPowerSave(&u8g2, 0);
+
+    u8g2_ClearBuffer(&u8g2);
+    u8g2_ClearDisplay(&u8g2);
+    u8g2_SetFont(&u8g2, u8g2_font_t0_11_te);
+    u8g2_SetDrawColor(&u8g2, 1);
+
     // oled init
     display.oled_init();
     display.set_brightness(nv_settings.data.disp_brightness);   // set brightness from saved flash settings

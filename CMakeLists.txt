@@ -6,6 +6,7 @@ set(TARGET_NAME display)
 include(pico_sdk_import.cmake)
 
 project(${TARGET_NAME} C CXX ASM)
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -ffunction-sections -fdata-sections -Wl,--gc-sections")
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 
@@ -31,6 +32,8 @@ add_compile_options(-Wall
 		
 set(CMAKE_SYSTEM_NAME Generic)		
 
+
+
 include_directories("./bitmap")
 # include_directories("./bldc")
 # include_directories("./bldc/comm/")
@@ -49,18 +52,40 @@ add_executable(${TARGET_NAME}
 	buffer.c
 	packet.c	
 	hw_config.c
+	u8x8_interface.cpp
 	)
 
 pico_generate_pio_header(${TARGET_NAME} ${CMAKE_CURRENT_LIST_DIR}/Button-debouncer/button_debounce.pio)
 
 target_sources(${TARGET_NAME} PRIVATE ./Button-debouncer/button_debounce.cpp)
-	
+
+
+# u8g2 related
+# Convenience to locate the library
+set(U8_PATH ${CMAKE_CURRENT_LIST_DIR}/u8g2)
+
+
+#add_subdirectory(${U8_PATH} u8g2)
+
+file(GLOB U8G2_SRC u8g2/csrc/*.c)
+add_library(u8g2 ${U8G2_SRC})
+
+target_include_directories(${TARGET_NAME} PRIVATE
+	u8g2/csrc
+)
+
+
+
+# include_directories("./u8g2")
+
 
 set_source_files_properties(crc.c PROPERTIES LANGUAGE CXX)
 set_source_files_properties(buffer.c PROPERTIES LANGUAGE CXX)
 set_source_files_properties(packet.c PROPERTIES LANGUAGE CXX)
 
 set_target_properties(${TARGET_NAME} PROPERTIES LINKER_LANGUAGE CXX)
+
+target_link_options(${TARGET_NAME} PRIVATE -Xlinker --print-memory-usage)
 
 # pull in common dependencies
 target_link_libraries(${TARGET_NAME} 
@@ -75,6 +100,7 @@ target_link_libraries(${TARGET_NAME}
 	hardware_pio
 	hardware_flash
 	FatFs_SPI
+	u8g2
 	)
 
 
