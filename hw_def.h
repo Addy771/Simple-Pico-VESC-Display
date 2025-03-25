@@ -36,6 +36,8 @@ UART0 RX | I2C0 SCL | SPI1 CSn | GP13 | 17│●              ●│24 | GP18   
 /* Configuration */
 
 #define UART_BAUDRATE 115200
+#define CAN_BAUDRATE
+#define RTC_I2C_CLK 400000
 #define LOG_SAMPLE_RATE 10      // How often to sample data from VESC (in Hz)
 
 
@@ -86,3 +88,8 @@ UART0 RX | I2C0 SCL | SPI1 CSn | GP13 | 17│●              ●│24 | GP18   
 #define ADC_0_GPIO 26
 #define ADC_1_GPIO 27
 #define ADC_2_GPIO 28
+
+
+/* Prototypes */
+
+void initialize_gpio(void);

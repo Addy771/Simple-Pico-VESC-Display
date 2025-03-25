@@ -53,6 +53,7 @@ add_executable(${TARGET_NAME}
 	packet.c	
 	hw_config.c
 	u8x8_interface.cpp
+	hw_def.c
 	)
 
 pico_generate_pio_header(${TARGET_NAME} ${CMAKE_CURRENT_LIST_DIR}/Button-debouncer/button_debounce.pio)

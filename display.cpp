@@ -31,7 +31,11 @@
 #include "f_util.h"
 #include "hw_config.h"
 #include "rtc.h"
+
+extern "C" 
+{
 #include "hw_def.h"
+}
 
 #include "pico-oled/font/press_start_2p.h"
 #include "pico-oled/font/too_simple.h"
@@ -127,30 +131,18 @@ int main()
     stdio_init_all();
     time_init();    
 
-    // Set Pico DC/DC converter to PWM mode to reduce noise at light load
-    gpio_put(23, 1);
-
-    // Init debug GPIO
-    gpio_init(DEBUG_GPIO);
-    gpio_set_dir(DEBUG_GPIO, GPIO_OUT);
-    gpio_put(DEBUG_GPIO, 1);
-
-    // Init i2c and configure it's GPIO pins
-    uint32_t i2c_clk = i2c_init(i2c_default, 400 * 1000);
-    //uint32_t i2c_clk = i2c_init(i2c_default, 1000 * 1000);  // 1120 kHz max (from testing on one display)
-    gpio_set_function(PICO_DEFAULT_I2C_SDA_PIN, GPIO_FUNC_I2C);
-    gpio_set_function(PICO_DEFAULT_I2C_SCL_PIN, GPIO_FUNC_I2C);
-    gpio_pull_up(PICO_DEFAULT_I2C_SDA_PIN);
-    gpio_pull_up(PICO_DEFAULT_I2C_SCL_PIN);
+    initialize_gpio();
 
     // Instantiate debouncer and configure GPIO
-    gpio_pull_up(PB_LEFT_GPIO);
-    gpio_pull_up(PB_RIGHT_GPIO);
 
     debouncer.debounce_gpio(PB_LEFT_GPIO);
-    debouncer.set_debounce_time(PB_LEFT_GPIO, 20.0);    // 20ms debounce time
     debouncer.debounce_gpio(PB_RIGHT_GPIO);
+    debouncer.debounce_gpio(PB_CENTER_GPIO);
+
+    debouncer.set_debounce_time(PB_LEFT_GPIO, 20.0);    // 20ms debounce time
     debouncer.set_debounce_time(PB_RIGHT_GPIO, 20.0);
+    debouncer.set_debounce_time(PB_CENTER_GPIO, 20.0);    
+
 
     // Set initial values of button states
     pb_left_prev_state = pb_left_state = debouncer.read(PB_LEFT_GPIO);
@@ -168,10 +160,10 @@ int main()
     u8g2_SetDrawColor(&u8g2, 1);
 
     // oled init
-    display.oled_init();
-    display.set_brightness(nv_settings.data.disp_brightness);   // set brightness from saved flash settings
+    // display.oled_init();
+    // display.set_brightness(nv_settings.data.disp_brightness);   // set brightness from saved flash settings
 
-    display.set_font(too_simple);
+    // display.set_font(too_simple);
     //display.set_font(press_start_2p);
 
     // // Print out some system information
@@ -726,18 +718,11 @@ void core1_entry()
     const uint BUILTIN_LED_PIN = PICO_DEFAULT_LED_PIN;
     // uint8_t LED_STATUS = 1;
 
-    // Set the LED pin as an output
-    gpio_init(BUILTIN_LED_PIN);
-    gpio_set_dir(BUILTIN_LED_PIN, GPIO_OUT);
 
-    // Set up debug output
-    gpio_init(DEBUG_GPIO);
-    gpio_set_dir(DEBUG_GPIO, GPIO_OUT);
 
-    // Initialize UART0 and it's GPIO pins
+
+    // Initialize UART0 
     real_baudrate = uart_init(uart0, UART_BAUDRATE);
-    gpio_set_function(UART_TX_GPIO, GPIO_FUNC_UART);
-    gpio_set_function(UART_RX_GPIO, GPIO_FUNC_UART);
 
     PACKET_STATE_t vesc_comm;
     uint8_t send_payload[50];

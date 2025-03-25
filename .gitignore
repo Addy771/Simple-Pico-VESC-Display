@@ -26,3 +26,4 @@ CMakeFiles/
 *_config.h
 *_generated_*
 *.rule
+*.map
