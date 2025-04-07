@@ -4,6 +4,7 @@
 #include "pico/multicore.h"
 #include "pico/bootrom.h"
 #include "pico/sync.h"
+#include "pico/cyw43_arch.h"
 
 #include "hardware/i2c.h"
 #include "hardware/clocks.h"
@@ -12,6 +13,7 @@
 #include "hardware/irq.h"
 #include "hardware/pwm.h"
 #include "hardware/uart.h"
+#include "hardware/exception.h"
 
 #include "pico-oled/pico-oled.hpp"
 #include "pico-oled/gfx_font.h"
@@ -42,7 +44,6 @@ extern "C"
 #include "pico-oled/font/Retron2000.h"
 #include "pico-oled/font/future_real.h"
 
-//#include "u8g2/cppsrc/U8g2lib.h"
 #include <u8g2.h>
 #include "u8x8_interface.hpp"
 
@@ -123,13 +124,14 @@ Debounce debouncer;
 
 
 
-
 // Core 0
 int main()
 {
-
     stdio_init_all();
-    time_init();    
+    time_init();  
+
+    cyw43_arch_init();    
+    cyw43_arch_gpio_put(CYW43_LED_GPIO, 1);      
 
     initialize_gpio();
 
@@ -147,17 +149,40 @@ int main()
     // Set initial values of button states
     pb_left_prev_state = pb_left_state = debouncer.read(PB_LEFT_GPIO);
     pb_right_prev_state = pb_right_state = debouncer.read(PB_RIGHT_GPIO);
-    
+
 
     // U8G2 init
+    gpio_put(DISPLAY_BACKLIGHT_GPIO, 0);    // Turn on backlight
     u8g2_Setup_st75256_jlx256128_f(&u8g2, U8G2_R0, u8x8_byte_3wire_sw_spi, u8x8_gpio_and_delay_pico);
     u8g2_InitDisplay(&u8g2);    // Init sequence, ends with display in sleep mode
     u8g2_SetPowerSave(&u8g2, 0);
 
     u8g2_ClearBuffer(&u8g2);
     u8g2_ClearDisplay(&u8g2);
-    u8g2_SetFont(&u8g2, u8g2_font_t0_11_te);
+    //u8g2_SetFont(&u8g2, u8g2_font_t0_11_te);
+    u8g2_SetFont(&u8g2, u8g2_font_10x20_tf);
     u8g2_SetDrawColor(&u8g2, 1);
+
+    u8g2_DrawStr(&u8g2, 10, 64, "Display Test");
+    u8g2_SendBuffer(&u8g2);
+
+    uint8_t contrast = 150;
+    char print_buf[100];
+
+    while(1)
+    {
+        u8g2_ClearBuffer(&u8g2);
+
+        u8g2_SetContrast(&u8g2, contrast);        
+        sprintf(print_buf, "Contrast: %d", contrast);
+        u8g2_DrawStr(&u8g2, 10, 40, print_buf);
+
+        u8g2_SendBuffer(&u8g2);
+
+        contrast += 5;
+        if (contrast >= 200)
+            contrast = 150;
+    }
 
     // oled init
     // display.oled_init();
@@ -715,7 +740,7 @@ void process_data(uint8_t *data, size_t len);
 // Second core thread. Handles UART communication
 void core1_entry()
 {
-    const uint BUILTIN_LED_PIN = PICO_DEFAULT_LED_PIN;
+    //const uint BUILTIN_LED_PIN = PICO_DEFAULT_LED_PIN;
     // uint8_t LED_STATUS = 1;
 
 

@@ -6,9 +6,16 @@ set(TARGET_NAME display)
 include(pico_sdk_import.cmake)
 
 project(${TARGET_NAME} C CXX ASM)
+
+# Trim data from binary that isn't going to be used. 
+#This fixes a flash region overflow caused by font data from u8g2
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -ffunction-sections -fdata-sections -Wl,--gc-sections")
+
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
+set(PICO_CXX_ENABLE_EXCEPTIONS 1)
+
+set(PICO_BOARD pico_w)
 
 if (PICO_SDK_VERSION_STRING VERSION_LESS "1.3.0")
 	message(FATAL_ERROR "Raspberry Pi Pico SDK version 1.3.0 (or later) required. Your version is ${PICO_SDK_VERSION_STRING}")
@@ -94,6 +101,7 @@ target_link_libraries(${TARGET_NAME}
 	pico_multicore 
 	pico_sync
 	pico_malloc
+	pico_cyw43_arch_none
 	hardware_i2c 
 	hardware_adc 
 	hardware_pwm 

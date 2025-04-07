@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include "pico/stdlib.h"
 #include "hardware/gpio.h"
+#include "hardware/i2c.h"
 #include <hw_def.h>
 
 
@@ -34,19 +35,16 @@ void initialize_gpio(void)
     gpio_set_function(UART_TX_GPIO, GPIO_FUNC_UART);
     gpio_set_function(UART_RX_GPIO, GPIO_FUNC_UART);
 
-    // I2C GPIO
-    i2c_init(0, RTC_I2C_CLK);   // i2c0
+    //I2C GPIO
+    i2c_init(i2c0, RTC_I2C_CLK);  
     gpio_set_function(RTC_SDA_GPIO, GPIO_FUNC_I2C);
     gpio_set_function(RTC_SCL_GPIO, GPIO_FUNC_I2C);
     gpio_pull_up(RTC_SDA_GPIO);
     gpio_pull_up(RTC_SCL_GPIO);    
 
+    //gpio_put(DISPLAY_BACKLIGHT_GPIO, 0);    //DEBUG
+
     // ADC inputs
-
-
-    // Set Pico DC/DC converter to PWM mode to reduce noise at light load
-    // *******figure out the GPIO number without hardcoding
-    //gpio_put(23, 1);
 
     // Init debug GPIO
     gpio_init(DEBUG_GPIO);
@@ -58,9 +56,20 @@ void initialize_gpio(void)
     gpio_pull_up(PB_RIGHT_GPIO);
     gpio_pull_up(PB_CENTER_GPIO);    
 
-    // Set the LED pin as an output
-    // gpio_init(BUILTIN_LED_PIN);
-    // gpio_set_dir(BUILTIN_LED_PIN, GPIO_OUT);   
-    // gpio_put(BUILTIN_LED_PIN, 0); 
+
+    /*
+        Pico W Notes
+
+        Onboard LED and PWM mode GPIO have been repurposed on Pico W and can't be used directly.
+        These are now driven by GPIO on the CYW43439 WiFi/BT interface chip. 
+
+        To use these GPIO requires different functions:
+        cyw43_arch_gpio_put(wl_gpio, value)
+        cyw43_arch_gpio_get(wl_gpio)
+
+        which can only be used after the CYW43 architecture has been initialized:
+        cyw43_arch_init()
+    
+    */
 
 }

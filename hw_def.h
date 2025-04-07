@@ -49,7 +49,7 @@ UART0 RX | I2C0 SCL | SPI1 CSn | GP13 | 17│●              ●│24 | GP18   
 
 // I2C bus for DS1307 RTC
 #define RTC_SDA_GPIO 20             // I2C0 SDA
-#define RTC_SCL_GPIO 27             // I2C0 SCL
+#define RTC_SCL_GPIO 21             // I2C0 SCL
 
 // ESC CAN bus transceiver
 #define CAN_TX_GPIO 8               // UART1 TX
@@ -88,6 +88,10 @@ UART0 RX | I2C0 SCL | SPI1 CSn | GP13 | 17│●              ●│24 | GP18   
 #define ADC_0_GPIO 26
 #define ADC_1_GPIO 27
 #define ADC_2_GPIO 28
+
+// CYW43 controlled IO
+#define CYW43_LED_GPIO 0
+#define CYW43_SMPS_PS_GPIO 1
 
 
 /* Prototypes */
