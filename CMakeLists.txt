@@ -13,7 +13,7 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -ffunction-sections -fdata-sections -Wl,--gc
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
-set(PICO_CXX_ENABLE_EXCEPTIONS 1)
+#set(PICO_CXX_ENABLE_EXCEPTIONS 1)
 
 set(PICO_BOARD pico_w)
 
@@ -68,7 +68,10 @@ pico_generate_pio_header(${TARGET_NAME} ${CMAKE_CURRENT_LIST_DIR}/Button-debounc
 target_sources(${TARGET_NAME} PRIVATE ./Button-debouncer/button_debounce.cpp)
 
 
-# u8g2 related
+### u8g2 related ###
+
+pico_generate_pio_header(${TARGET_NAME} ${CMAKE_CURRENT_LIST_DIR}/spi_tx_9bit.pio)
+
 # Convenience to locate the library
 set(U8_PATH ${CMAKE_CURRENT_LIST_DIR}/u8g2)
 
@@ -108,6 +111,7 @@ target_link_libraries(${TARGET_NAME}
 	hardware_uart 
 	hardware_pio
 	hardware_flash
+	hardware_spi
 	FatFs_SPI
 	u8g2
 	)

@@ -3,6 +3,7 @@
 #include "pico/stdlib.h"
 #include "hardware/gpio.h"
 #include "hardware/i2c.h"
+#include "hardware/spi.h"
 #include <hw_def.h>
 
 
@@ -41,8 +42,6 @@ void initialize_gpio(void)
     gpio_set_function(RTC_SCL_GPIO, GPIO_FUNC_I2C);
     gpio_pull_up(RTC_SDA_GPIO);
     gpio_pull_up(RTC_SCL_GPIO);    
-
-    //gpio_put(DISPLAY_BACKLIGHT_GPIO, 0);    //DEBUG
 
     // ADC inputs
 

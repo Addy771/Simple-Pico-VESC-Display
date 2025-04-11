@@ -13,7 +13,7 @@
 #include "hardware/irq.h"
 #include "hardware/pwm.h"
 #include "hardware/uart.h"
-#include "hardware/exception.h"
+#include "hardware/spi.h"
 
 #include "pico-oled/pico-oled.hpp"
 #include "pico-oled/gfx_font.h"
@@ -46,6 +46,7 @@ extern "C"
 
 #include <u8g2.h>
 #include "u8x8_interface.hpp"
+#include "spi_tx_9bit.pio.h"
 
 /*  TODO: 
 - add a function in pico-led library to blank out the area where text would be
@@ -122,6 +123,14 @@ pico_oled display(OLED_SSD1309, /*i2c_address=*/ 0x3C, /*screen_width=*/ 128, /*
 
 Debounce debouncer;
 
+absolute_time_t current_time_ms = get_absolute_time();
+absolute_time_t bootloader_timer_ms = current_time_ms;
+absolute_time_t next_frame_time = current_time_ms;
+absolute_time_t left_button_timer = current_time_ms;
+absolute_time_t next_fps_count = current_time_ms;
+absolute_time_t last_odometer_count = current_time_ms;
+absolute_time_t prev_time_sample = current_time_ms;
+absolute_time_t buff_write_time;
 
 
 // Core 0
@@ -129,9 +138,6 @@ int main()
 {
     stdio_init_all();
     time_init();  
-
-    cyw43_arch_init();    
-    cyw43_arch_gpio_put(CYW43_LED_GPIO, 1);      
 
     initialize_gpio();
 
@@ -153,7 +159,8 @@ int main()
 
     // U8G2 init
     gpio_put(DISPLAY_BACKLIGHT_GPIO, 0);    // Turn on backlight
-    u8g2_Setup_st75256_jlx256128_f(&u8g2, U8G2_R0, u8x8_byte_3wire_sw_spi, u8x8_gpio_and_delay_pico);
+    //u8g2_Setup_st75256_jlx256128_f(&u8g2, U8G2_R0, u8x8_byte_3wire_sw_spi, u8x8_gpio_and_delay_pico);
+    u8g2_Setup_st75256_jlx256128_f(&u8g2, U8G2_R0, U8G2_BYTE_FN, u8x8_gpio_and_delay_pico);
     u8g2_InitDisplay(&u8g2);    // Init sequence, ends with display in sleep mode
     u8g2_SetPowerSave(&u8g2, 0);
 
@@ -162,26 +169,54 @@ int main()
     //u8g2_SetFont(&u8g2, u8g2_font_t0_11_te);
     u8g2_SetFont(&u8g2, u8g2_font_10x20_tf);
     u8g2_SetDrawColor(&u8g2, 1);
+    u8g2_SetContrast(&u8g2, 170);    
 
     u8g2_DrawStr(&u8g2, 10, 64, "Display Test");
     u8g2_SendBuffer(&u8g2);
 
-    uint8_t contrast = 150;
+    cyw43_arch_init();    
+    cyw43_arch_gpio_put(CYW43_LED_GPIO, 1);   
+
+    sleep_ms(1000);
+
+    uint8_t bx, by;     // box x,y
+    int8_t xdir, ydir;
     char print_buf[100];
 
+    bx = by = 0;
+    xdir = ydir = 1;
+    next_frame_time = get_absolute_time();
     while(1)
     {
         u8g2_ClearBuffer(&u8g2);
 
-        u8g2_SetContrast(&u8g2, contrast);        
-        sprintf(print_buf, "Contrast: %d", contrast);
-        u8g2_DrawStr(&u8g2, 10, 40, print_buf);
+        sleep_until(next_frame_time);
+        next_frame_time = delayed_by_ms(next_frame_time, 1000 / 20);
+    
+        sprintf(print_buf, "buff_write_time: %lld us", absolute_time_diff_us(current_time_ms, buff_write_time));
+        u8g2_DrawStr(&u8g2, 0, 116, print_buf);
 
+        bx += xdir;
+        by += ydir;
+
+        // Flip directions at limits
+        if (xdir == 1 && bx >= u8g2_GetDisplayWidth(&u8g2)-16)
+            xdir = -1;
+        else if (xdir == -1 && bx == 0)
+            xdir = 1;
+        if (ydir == 1 && by >= u8g2_GetDisplayHeight(&u8g2)-16)
+            ydir = -1;
+        else if (ydir == -1 && by == 0)
+            ydir = 1;        
+
+        u8g2_DrawBox(&u8g2, bx, by, 16, 16);
+
+        // Track time taken to send buffer to display
+        current_time_ms = get_absolute_time();
         u8g2_SendBuffer(&u8g2);
+        buff_write_time = get_absolute_time();
 
-        contrast += 5;
-        if (contrast >= 200)
-            contrast = 150;
+
     }
 
     // oled init
@@ -270,14 +305,6 @@ int main()
     uint8_t temp_str_x, temp_str_y;
 
     #define ROLLING_AVG_RATIO 0.3
-
-    absolute_time_t current_time_ms = get_absolute_time();
-    absolute_time_t bootloader_timer_ms = current_time_ms;
-    absolute_time_t next_frame_time = current_time_ms;
-    absolute_time_t left_button_timer = current_time_ms;
-    absolute_time_t next_fps_count = current_time_ms;
-    absolute_time_t last_odometer_count = current_time_ms;
-    absolute_time_t prev_time_sample = current_time_ms;
 
     int64_t time_between_odometer_check_ms = 0;
 

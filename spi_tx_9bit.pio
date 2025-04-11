@@ -1,0 +1,43 @@
+
+
+//.pio_version 0
+
+.program spi_tx_9bit
+.side_set 1
+
+
+.wrap_target
+    out pins, 1     side 0  ; stall here if no data (clock low)
+    nop             side 1
+.wrap
+
+/*
+% c-sdk
+{
+    static inline void spi_tx_9bit_program_init(PIO pio, uint sm, uint offset, uint data_pin, uint clk_pin, float clk_div)
+    {
+        pio_gpio_init(pio, data_pin);
+        pio_gpio_init(pio, clk_pin);
+        pio_sm_set_consecutive_pindirs(pio, sm, data_pin, 1, true);
+        pio_sm_set_consecutive_pindirs(pio, sm, clk_pin, 1, true);
+        pio_sm_config cnf = spi_tx_9bit_program_get_default_config(offset);
+        sm_config_set_sideset_pins(&cnf, clk_pin);
+        sm_config_set_out_pins(&cnf, data_pin, 1);
+
+        // Only TX fifo is needed since we will only be transmitting
+        sm_config_set_fifo_join(&cnf, PIO_FIFO_JOIN_TX);
+        sm_config_set_clkdiv(&cnf, clk_div);
+
+        // Shift left (MSB first), autopull enabled, autopull after 9 bits have been transmitted
+        sm_config_set_out_shift(&cnf, false, true, 9);
+    }
+
+
+    static inline void spi_tx_9bit_wait_idle(PIO pio, uint sm)
+    {
+        uint32_t sm_stall_mask = 1u << (sm + PIO_DEBUG_TXSTALL_LSB);
+        pio->fdebug = sm_stall_mask;
+        while (!(pio->fdebug & sm_stall_mask));
+    }
+%}
+*/
