@@ -52,7 +52,7 @@ static spi_t spis[] = {  // One for each SPI.
         .mosi_gpio_drive_strength = GPIO_DRIVE_STRENGTH_4MA,
         .sck_gpio_drive_strength = GPIO_DRIVE_STRENGTH_4MA,       
 
-        .baud_rate = 5 * 1000 * 1000, 
+        .baud_rate = SD_SPI_CLK_HZ, 
 
         .dma_isr = spi1_dma_isr,
         .initialized = false,
@@ -68,9 +68,9 @@ static sd_card_t sd_cards[] = {  // One for each SD card
         .set_drive_strength = true,
         .ss_gpio_drive_strength = GPIO_DRIVE_STRENGTH_4MA,
 
-        //.use_card_detect = false,
-        //.card_detect_gpio = 22,   // Card detect
-        //.card_detected_true = -1,  // What the GPIO read returns when a card is
+        .use_card_detect = true,
+        .card_detect_gpio = SD_DETECT_GPIO,   // Card detect
+        .card_detected_true = 0,  // What the GPIO read returns when a card is
                                   // present. Use -1 if there is no card detect.
         .m_Status = STA_NOINIT
     }

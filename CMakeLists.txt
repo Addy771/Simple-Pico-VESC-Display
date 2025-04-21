@@ -112,6 +112,7 @@ target_link_libraries(${TARGET_NAME}
 	hardware_pio
 	hardware_flash
 	hardware_spi
+	hardware_rtc
 	FatFs_SPI
 	u8g2
 	)

@@ -14,6 +14,7 @@
 #include "hardware/pwm.h"
 #include "hardware/uart.h"
 #include "hardware/spi.h"
+#include "hardware/rtc.h"
 
 #include "pico-oled/pico-oled.hpp"
 #include "pico-oled/gfx_font.h"
@@ -87,6 +88,9 @@ extern "C"
 #define BATT_TERMINAL_WIDTH 8
 #define BATT_TERMINAL_HEIGHT 3
 
+#define U8LOG_WIDTH 48
+#define U8LOG_HEIGHT 12
+
 // function prototypes
 void draw_battery_icon();
 
@@ -94,6 +98,9 @@ void core1_entry();
 
 
 u8g2_t u8g2;
+u8log_t u8g2log;
+uint8_t u8log_buf[U8LOG_WIDTH*U8LOG_HEIGHT];
+
 
 
 uint32_t real_baudrate = 0;
@@ -140,6 +147,7 @@ int main()
     time_init();  
 
     initialize_gpio();
+    init_external_rtc();
 
     // Instantiate debouncer and configure GPIO
 
@@ -158,8 +166,7 @@ int main()
 
 
     // U8G2 init
-    gpio_put(DISPLAY_BACKLIGHT_GPIO, 0);    // Turn on backlight
-    //u8g2_Setup_st75256_jlx256128_f(&u8g2, U8G2_R0, u8x8_byte_3wire_sw_spi, u8x8_gpio_and_delay_pico);
+    set_backlight(120);
     u8g2_Setup_st75256_jlx256128_f(&u8g2, U8G2_R0, U8G2_BYTE_FN, u8x8_gpio_and_delay_pico);
     u8g2_InitDisplay(&u8g2);    // Init sequence, ends with display in sleep mode
     u8g2_SetPowerSave(&u8g2, 0);
@@ -182,6 +189,49 @@ int main()
     uint8_t bx, by;     // box x,y
     int8_t xdir, ydir;
     char print_buf[100];
+    uint8_t rxdata;
+    int ret;
+
+    u8log_Init(&u8g2log, U8LOG_WIDTH, U8LOG_HEIGHT, u8log_buf);
+    u8g2_SetFont(&u8g2, u8g2_font_t0_11_te);
+
+    // // Scan I2C address range
+    // sprintf(print_buf, "Scanning I2C address range..\n");
+    // //u8log_WriteString(&u8g2log, print_buf);  
+    // print_ulog(print_buf);
+    // sprintf(print_buf, "   0 1 2 3 4 5 6 7 8 9 A B C D E F\n");
+    // // u8log_WriteString(&u8g2log, print_buf);      
+    // print_ulog(print_buf);
+
+    // for (int addr = 0; addr < (1 << 7); ++addr)
+    // {
+    //     if (addr % 16 == 0)        
+    //     {
+    //         sprintf(print_buf, "%02x ", addr);
+    //         u8log_WriteString(&u8g2log, print_buf);              
+    //     }
+    //     // Skip reserved addresses
+    //     if ((addr & 0x78) == 0 || (addr & 0x78) == 0x78)
+    //         ret = PICO_ERROR_GENERIC;
+    //     else
+    //         ret = i2c_read_blocking(i2c0, addr, &rxdata, 1, false);
+
+    //     sprintf(print_buf, ret < 0 ? "." : "@");
+    //     u8log_WriteString(&u8g2log, print_buf);          
+
+    //     sprintf(print_buf, addr % 16 == 15 ? "\n" : " ");
+    //     u8log_WriteString(&u8g2log, print_buf);              
+    // }
+
+    // RTC testing
+    datetime_t ext_rtc_time;
+    uint8_t write_val = 0xAA;
+    uint8_t read_val;
+    set_rtc_sram(DS1307_SRAM_START+1, &write_val, 1);
+    get_rtc_sram(DS1307_SRAM_START+1, &read_val, 1);
+    sprintf(print_buf, "RTC SRAM 0x%02x = 0x%02x\n", DS1307_SRAM_START+1, read_val);
+    u8log_WriteString(&u8g2log, print_buf);      
+
 
     bx = by = 0;
     xdir = ydir = 1;
@@ -192,9 +242,15 @@ int main()
 
         sleep_until(next_frame_time);
         next_frame_time = delayed_by_ms(next_frame_time, 1000 / 20);
+
     
-        sprintf(print_buf, "buff_write_time: %lld us", absolute_time_diff_us(current_time_ms, buff_write_time));
-        u8g2_DrawStr(&u8g2, 0, 116, print_buf);
+        //sprintf(print_buf, "buff_write_time: %lld us", absolute_time_diff_us(current_time_ms, buff_write_time));
+        //u8g2_DrawStr(&u8g2, 0, 116, print_buf);
+        
+
+
+        // sprintf(print_buf, "x=%d  y=%d\n", bx, by);
+        // u8log_WriteString(&u8g2log, print_buf);
 
         bx += xdir;
         by += ydir;
@@ -209,13 +265,28 @@ int main()
         else if (ydir == -1 && by == 0)
             ydir = 1;        
 
+        get_rtc_time(&ext_rtc_time);
+        sprintf(print_buf, "%4d-%02d-%02d %02d:%02d:%02d\r", 
+            ext_rtc_time.year,
+            ext_rtc_time.month,
+            ext_rtc_time.day,
+            ext_rtc_time.hour,
+            ext_rtc_time.min,
+            ext_rtc_time.sec
+        );
+        u8log_WriteString(&u8g2log, print_buf);             
+
+
+        u8g2_DrawLog(&u8g2, 0, 12, &u8g2log);    // Draw log text area
+
+        u8g2_SetDrawColor(&u8g2, 2);    // xor mode for box
         u8g2_DrawBox(&u8g2, bx, by, 16, 16);
+        u8g2_SetDrawColor(&u8g2, 1);
 
         // Track time taken to send buffer to display
         current_time_ms = get_absolute_time();
         u8g2_SendBuffer(&u8g2);
         buff_write_time = get_absolute_time();
-
 
     }
 

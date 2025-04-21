@@ -33,13 +33,22 @@ UART0 RX | I2C0 SCL | SPI1 CSn | GP13 | 17│●              ●│24 | GP18   
                                                  └╌╌╌╌╌ SWCLK
 */
 
+#include "hardware/i2c.h"
+#include "hardware/rtc.h"
+
+#ifndef HW_DEF_H
+#define HW_DEF_H
+
 /* Configuration */
 
 #define UART_BAUDRATE 115200
 #define CAN_BAUDRATE
-#define RTC_I2C_CLK 400000
-#define LOG_SAMPLE_RATE 10      // How often to sample data from VESC (in Hz)
-
+#define RTC_I2C_CLK 100000
+#define RTC_I2C_ADDR 0x68
+#define RTC_I2C_UNIT i2c0
+#define LOG_SAMPLE_RATE 10              // How often to sample data from VESC (in Hz)
+#define DISPLAY_BACKLIGHT_PWM_KHZ 10    // Backlight PWM dimming frequency
+#define SD_SPI_CLK_HZ 5 * 1000 * 1000
 
 /* Pinout */
 
@@ -94,6 +103,41 @@ UART0 RX | I2C0 SCL | SPI1 CSn | GP13 | 17│●              ●│24 | GP18   
 #define CYW43_SMPS_PS_GPIO 1
 
 
+// DS1307 register map
+typedef enum
+{
+    BCD_SECONDS = 0x00,
+    BCD_MINUTES = 0x01,
+    BCD_HOURS = 0x02,
+    WEEKDAY = 0x03,
+    BCD_DAYS = 0x04,
+    BCD_MONTHS = 0x05,
+    BCD_YEARS = 0x06,
+    DS1307_CONTROL = 0x07,
+    DS1307_SRAM_START = 0x08,
+    DS1307_SRAM_END = 0x3F
+} rtc_ds1307_map;
+
+// RTC SRAM allocation
+typedef enum
+{
+    RTC_SRAM_KEY = DS1307_SRAM_START
+} rtc_sram;
+
+#define RTC_KEY_VALUE 0x55
+
+extern uint8_t rtc_connected;
+extern uint8_t rtc_time_valid;
+
+
 /* Prototypes */
 
 void initialize_gpio(void);
+void set_backlight(uint8_t brightness);
+void init_external_rtc(void);
+void set_rtc_time(datetime_t current_time);
+void get_rtc_time(datetime_t *rtc_time);
+void set_rtc_sram(uint8_t sram_address, uint8_t *data, uint8_t len);
+void get_rtc_sram(uint8_t sram_address, uint8_t *data, uint8_t len);
+
+#endif

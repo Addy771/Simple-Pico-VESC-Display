@@ -5,13 +5,14 @@
 #define U8X8_INTERFACE_H
 
 #define PIO_3WIRE_CLK_KHZ 12000
-//#define U8G2_USE_SW_SPI
+//#define U8G2_USE_SW_SPI   // Uncomment to use bitbanged SPI instead of HW PIO SPI
 
 
 
 uint8_t __not_in_flash_func(u8x8_gpio_and_delay_pico)(u8x8_t *u8x8, uint8_t msg,uint8_t arg_int, void *arg_ptr);
 uint8_t __not_in_flash_func(u8x8_byte_pio_3wire_spi)(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int, void *arg_ptr);
 
+// Set byte handler function according to SW/HW SPI mode
 #ifdef U8G2_USE_SW_SPI
 #define U8G2_BYTE_FN u8x8_byte_3wire_sw_spi
 
@@ -19,5 +20,10 @@ uint8_t __not_in_flash_func(u8x8_byte_pio_3wire_spi)(u8x8_t *u8x8, uint8_t msg, 
 #define U8G2_BYTE_FN u8x8_byte_pio_3wire_spi
 #endif
 
+
+extern u8g2_t u8g2;
+extern u8log_t u8g2log;
+
+void print_ulog(const char *log_str);
 
 #endif

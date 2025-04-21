@@ -196,4 +196,8 @@ uint8_t __not_in_flash_func(u8x8_byte_pio_3wire_spi)(u8x8_t *u8x8, uint8_t msg, 
 }
 
 
-
+// Print to u8log
+void print_ulog(const char *log_str)
+{
+    u8log_WriteString(&u8g2log, log_str);  
+}
