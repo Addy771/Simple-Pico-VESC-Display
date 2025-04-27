@@ -49,6 +49,8 @@ extern "C"
 #include "u8x8_interface.hpp"
 #include "spi_tx_9bit.pio.h"
 
+#include "page_ctrl.hpp"
+
 /*  TODO: 
 - add a function in pico-led library to blank out the area where text would be
 - improve analog gauge to have adjustable needle len
@@ -97,8 +99,8 @@ void draw_battery_icon();
 void core1_entry();
 
 
-u8g2_t u8g2;
-u8log_t u8g2log;
+// u8g2_t u8g2;
+// u8log_t u8g2log;
 uint8_t u8log_buf[U8LOG_WIDTH*U8LOG_HEIGHT];
 
 
@@ -139,6 +141,7 @@ absolute_time_t last_odometer_count = current_time_ms;
 absolute_time_t prev_time_sample = current_time_ms;
 absolute_time_t buff_write_time;
 
+page_controller page_ctrl;
 
 // Core 0
 int main()
@@ -167,33 +170,28 @@ int main()
 
     // U8G2 init
     set_backlight(120);
-    u8g2_Setup_st75256_jlx256128_f(&u8g2, U8G2_R0, U8G2_BYTE_FN, u8x8_gpio_and_delay_pico);
-    u8g2_InitDisplay(&u8g2);    // Init sequence, ends with display in sleep mode
-    u8g2_SetPowerSave(&u8g2, 0);
+    u8g2_Setup_st75256_jlx256128_f(&page_ctrl.u8g2, U8G2_R0, U8G2_BYTE_FN, u8x8_gpio_and_delay_pico);
+    u8g2_InitDisplay(&page_ctrl.u8g2);    // Init sequence, ends with display in sleep mode
+    u8g2_SetContrast(&page_ctrl.u8g2, 170); 
+    u8g2_SetPowerSave(&page_ctrl.u8g2, 0);
 
-    u8g2_ClearBuffer(&u8g2);
-    u8g2_ClearDisplay(&u8g2);
-    //u8g2_SetFont(&u8g2, u8g2_font_t0_11_te);
-    u8g2_SetFont(&u8g2, u8g2_font_10x20_tf);
-    u8g2_SetDrawColor(&u8g2, 1);
-    u8g2_SetContrast(&u8g2, 170);    
-
-    u8g2_DrawStr(&u8g2, 10, 64, "Display Test");
-    u8g2_SendBuffer(&u8g2);
+    u8g2_ClearBuffer(&page_ctrl.u8g2);
+    u8g2_ClearDisplay(&page_ctrl.u8g2);
+    //u8g2_SetFont(&page_ctrl.u8g2, u8g2_font_t0_11_te);
+    u8g2_SetFont(&page_ctrl.u8g2, u8g2_font_10x20_tf);
+    u8g2_SetDrawColor(&page_ctrl.u8g2, 1);  
+    u8log_Init(&page_ctrl.u8log, U8LOG_WIDTH, U8LOG_HEIGHT, u8log_buf);
 
     cyw43_arch_init();    
-    cyw43_arch_gpio_put(CYW43_LED_GPIO, 1);   
 
-    sleep_ms(1000);
+    // uint8_t bx, by;     // box x,y
+    // int8_t xdir, ydir;
+    // char print_buf[100];
+    // uint8_t rxdata;
+    // int ret;
 
-    uint8_t bx, by;     // box x,y
-    int8_t xdir, ydir;
-    char print_buf[100];
-    uint8_t rxdata;
-    int ret;
-
-    u8log_Init(&u8g2log, U8LOG_WIDTH, U8LOG_HEIGHT, u8log_buf);
-    u8g2_SetFont(&u8g2, u8g2_font_t0_11_te);
+    // u8log_Init(&u8g2log, U8LOG_WIDTH, U8LOG_HEIGHT, u8log_buf);
+    // u8g2_SetFont(&u8g2, u8g2_font_t0_11_te);
 
     // // Scan I2C address range
     // sprintf(print_buf, "Scanning I2C address range..\n");
@@ -224,24 +222,38 @@ int main()
     // }
 
     // RTC testing
-    datetime_t ext_rtc_time;
-    uint8_t write_val = 0xAA;
-    uint8_t read_val;
-    set_rtc_sram(DS1307_SRAM_START+1, &write_val, 1);
-    get_rtc_sram(DS1307_SRAM_START+1, &read_val, 1);
-    sprintf(print_buf, "RTC SRAM 0x%02x = 0x%02x\n", DS1307_SRAM_START+1, read_val);
-    u8log_WriteString(&u8g2log, print_buf);      
+    // datetime_t ext_rtc_time;
+    // uint8_t write_val = 0xAA;
+    // uint8_t read_val;
+    // set_rtc_sram(DS1307_SRAM_START+1, &write_val, 1);
+    // get_rtc_sram(DS1307_SRAM_START+1, &read_val, 1);
+    // sprintf(print_buf, "RTC SRAM 0x%02x = 0x%02x\n", DS1307_SRAM_START+1, read_val);
+    // u8log_WriteString(&u8g2log, print_buf);      
 
 
-    bx = by = 0;
-    xdir = ydir = 1;
+    // bx = by = 0;
+    // xdir = ydir = 1;
+    // char print_buf[100];
+    // u8g2_SetFont(&page_ctrl.u8g2, u8g2_font_t0_11_te);
+    // u8g2_DrawStr(&page_ctrl.u8g2, 0, 12, "TEST");
+
+    // sprintf(print_buf, "LOCAL U8: 0x%8X, LOG: 0x%8X", &page_ctrl.u8g2, &page_ctrl.u8log);  
+    // u8g2_DrawStr(&page_ctrl.u8g2, 0, 24, print_buf);
+
+    // // sprintf(print_buf, "OBJ.  U8: 0x%8X, LOG: 0x%8X", page_ctrl.u8g2_p, page_ctrl.u8log_p);  
+    // // u8g2_DrawStr(&page_ctrl.u8g2, 0, 36, print_buf);    
+
+    // u8g2_SendBuffer(&page_ctrl.u8g2);
+    // sleep_ms(1000);
+
     next_frame_time = get_absolute_time();
     while(1)
     {
-        u8g2_ClearBuffer(&u8g2);
-
         sleep_until(next_frame_time);
         next_frame_time = delayed_by_ms(next_frame_time, 1000 / 20);
+
+        page_ctrl.update();
+        page_ctrl.draw_page();
 
     
         //sprintf(print_buf, "buff_write_time: %lld us", absolute_time_diff_us(current_time_ms, buff_write_time));
@@ -252,107 +264,43 @@ int main()
         // sprintf(print_buf, "x=%d  y=%d\n", bx, by);
         // u8log_WriteString(&u8g2log, print_buf);
 
-        bx += xdir;
-        by += ydir;
+        // bx += xdir;
+        // by += ydir;
 
-        // Flip directions at limits
-        if (xdir == 1 && bx >= u8g2_GetDisplayWidth(&u8g2)-16)
-            xdir = -1;
-        else if (xdir == -1 && bx == 0)
-            xdir = 1;
-        if (ydir == 1 && by >= u8g2_GetDisplayHeight(&u8g2)-16)
-            ydir = -1;
-        else if (ydir == -1 && by == 0)
-            ydir = 1;        
+        // // Flip directions at limits
+        // if (xdir == 1 && bx >= u8g2_GetDisplayWidth(&u8g2)-16)
+        //     xdir = -1;
+        // else if (xdir == -1 && bx == 0)
+        //     xdir = 1;
+        // if (ydir == 1 && by >= u8g2_GetDisplayHeight(&u8g2)-16)
+        //     ydir = -1;
+        // else if (ydir == -1 && by == 0)
+        //     ydir = 1;        
 
-        get_rtc_time(&ext_rtc_time);
-        sprintf(print_buf, "%4d-%02d-%02d %02d:%02d:%02d\r", 
-            ext_rtc_time.year,
-            ext_rtc_time.month,
-            ext_rtc_time.day,
-            ext_rtc_time.hour,
-            ext_rtc_time.min,
-            ext_rtc_time.sec
-        );
-        u8log_WriteString(&u8g2log, print_buf);             
+        // get_rtc_time(&ext_rtc_time);
+        // sprintf(print_buf, "%4d-%02d-%02d %02d:%02d:%02d\r", 
+        //     ext_rtc_time.year,
+        //     ext_rtc_time.month,
+        //     ext_rtc_time.day,
+        //     ext_rtc_time.hour,
+        //     ext_rtc_time.min,
+        //     ext_rtc_time.sec
+        // );
+        // u8log_WriteString(&u8g2log, print_buf);             
 
 
-        u8g2_DrawLog(&u8g2, 0, 12, &u8g2log);    // Draw log text area
+        // u8g2_DrawLog(&u8g2, 0, 12, &u8g2log);    // Draw log text area
 
-        u8g2_SetDrawColor(&u8g2, 2);    // xor mode for box
-        u8g2_DrawBox(&u8g2, bx, by, 16, 16);
-        u8g2_SetDrawColor(&u8g2, 1);
+        // u8g2_SetDrawColor(&u8g2, 2);    // xor mode for box
+        // u8g2_DrawBox(&u8g2, bx, by, 16, 16);
+        // u8g2_SetDrawColor(&u8g2, 1);
 
-        // Track time taken to send buffer to display
-        current_time_ms = get_absolute_time();
-        u8g2_SendBuffer(&u8g2);
-        buff_write_time = get_absolute_time();
+        // // Track time taken to send buffer to display
+        // current_time_ms = get_absolute_time();
+        // u8g2_SendBuffer(&u8g2);
+        // buff_write_time = get_absolute_time();
 
     }
-
-    // oled init
-    // display.oled_init();
-    // display.set_brightness(nv_settings.data.disp_brightness);   // set brightness from saved flash settings
-
-    // display.set_font(too_simple);
-    //display.set_font(press_start_2p);
-
-    // // Print out some system information
-    // uint32_t f_clk_sys = frequency_count_khz(CLOCKS_FC0_SRC_VALUE_CLK_SYS);
-
-
-    // for(;;)
-    // {
-    //     display.fill(0x1);    // 1/8th lit, 12.5%
-    //     display.render();        
-    //     sleep_ms(5000);
-
-    //     display.fill(0x9);    // 1/4th lit, 25%
-    //     display.render();        
-    //     sleep_ms(5000);
-
-    //     display.fill(0xAA);    // 1/2th lit, 50%
-    //     display.render();        
-    //     sleep_ms(5000);
-
-    //     display.fill(0xFF);    // all lit, 100%
-    //     display.render();        
-    //     sleep_ms(5000);        
-    // }
-
-    // // Show a page of debug values
-    // display.set_cursor(0,0);
-    // display.print("Pico SVD\n\n");
-
-    // analog_gauge speedo(&display);
-    // speedo.set_position(OLED_HEIGHT, 120);
-    // speedo.set_scale(0, 100, 245, 295);
-    // speedo.set_markers(5, 110, 16, 1);
-    // speedo.set_value(25);
-    // speedo.draw();
-
-    // analog_gauge dial(&display);
-    // dial.set_position(117, 53);
-    // dial.set_scale(0, 60, 90, 450);
-    // dial.set_markers(6, 10, 2, 1);
-    // dial.set_value(10);
-    // dial.draw();
-
-
-    // display.render();
-
-    // for(;;);
-    // display.print("CLK_SYS:  ");
-    // display.print_num("%d kHz\n", f_clk_sys);
-    // display.print("Baudrate: ");
-    // display.print_num("%d Bps\n", real_baudrate);
-    // display.print("PRESS ANY BUTTON TO TEST SD\n");
-    // display.render();
-
-    // while(!debouncer.read(PB_LEFT_GPIO) && !debouncer.read(PB_RIGHT_GPIO));
-
-
-    sleep_ms(2000); // can remove?
 
     // Start core 1
     multicore_launch_core1(core1_entry);
@@ -721,76 +669,6 @@ int main()
         display.render();
     }
 
-    // while(true)
-    // {
-    //     display.fill(0);
-
-    //     display.set_cursor(0,0);
-
-        
-    //     mutex_enter_blocking(&float_mutex);
-
-
-    //     // display.print_num(" VIN: %.1fV\n", data_pt.v_in);
-    //     // display.print_num("TFET: %.1fC\n", data_pt.temp_mos);
-    //     // display.print_num("TMOT: %.1fC\n", data_pt.temp_motor);        
-    //     // display.print_num("ERPM: %d\n", data_pt.rpm);  
-    //     //display.print_num("ADC1_RAW: %.1fV\n", adc_v1);
-    //     //display.print_num("ADC1_DEC: %.3f\n", data_pt.adc1_decoded);
-    //     //display.print_num("ADC2_RAW: %.1fV\n", adc_v2);
-    //     //display.print_num("ADC2_DEC: %.3f\n", data_pt.adc2_decoded);
-
-    //     display.draw_vbar(data_pt.adc1_decoded*100, 4, 20, 8, 60);
-
-    //     display.draw_hbar(data_pt.adc1_decoded*100, 1, 20, 20, 60, 24);
-    //     display.draw_hbar(data_pt.adc1_decoded*100, 0, 70, 20, 110, 24);        
-
-    //     display.print_num("BRIGHTNESS: %d\n", nv_settings.data.disp_brightness);
-    //     display.print_num("FLASH PG=%d", nv_settings.page_id);
-    //     display.print_num("    BLOCK=%d\n\r", nv_settings.block_id);
-    //     display.print(vesc_connected ? "VESC CONNECTED" : "VESC NOT CONNECTED");
-
-    //     // char hex_str[10];
-    //     // uint8_t cols = 0;
-    //     // for (uint8_t idx = 0; idx < 20; idx++)
-    //     // {
-    //     //     if (cols++ == 4)
-    //     //     {
-    //     //         cols = 0;
-    //     //         display.print("\n");
-    //     //     }
-
-    //     //     sprintf(hex_str, "%.2X ", get_values_response[idx]);
-    //     //     display.print(hex_str);            
-    //     // }        
-
-    //     mutex_exit(&float_mutex);
-
-    //     // Process inputs
-    //     pb_left_state = debouncer.read(PB_LEFT_GPIO);
-    //     pb_right_state = debouncer.read(PB_RIGHT_GPIO);
-
-    //     // Draw the state of the buttons
-    //     if (pb_left_state)
-    //         display.fill_rect(0, 80, 30, 100, 50);
-    //     else
-    //         display.draw_box(80, 30, 100, 50);
-
-    //     if (pb_right_state)
-    //         display.fill_rect(0, 105, 30, 125, 50);
-    //     else
-    //         display.draw_box(105, 30, 125, 50);
-
-
-    //     pb_left_prev_state = pb_left_state;
-    //     pb_right_prev_state = pb_right_state;
-
-
-    //     draw_SD_status(118,0);
-
-    //     display.render();
-
-    // }
 }
 
 void draw_battery_icon()
