@@ -8,14 +8,10 @@
 #include <string.h>
 #include "nv_flash.hpp"
 
-auto_init_mutex(flash_lock);
-
-nv_flash_storage nv_settings(&flash_lock);
-
 
 /// @brief A non-volatile data manager which uses the code flash memory for storage
 /// @param flash_write_lock A mutex which will be used to suspend execution on the other processor core
-nv_flash_storage::nv_flash_storage(mutex_t *flash_write_lock)
+void nv_flash_storage::init(mutex_t *flash_write_lock)
 {
     uint8_t *flash_byte;
     uint address;

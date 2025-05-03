@@ -39,6 +39,7 @@ UART0 RX | I2C0 SCL | SPI1 CSn | GP13 | 17│●              ●│24 | GP18   
 #ifndef HW_DEF_H
 #define HW_DEF_H
 
+
 /* Configuration */
 
 #define UART_BAUDRATE 115200
@@ -49,6 +50,9 @@ UART0 RX | I2C0 SCL | SPI1 CSn | GP13 | 17│●              ●│24 | GP18   
 #define LOG_SAMPLE_RATE 10              // How often to sample data from VESC (in Hz)
 #define DISPLAY_BACKLIGHT_PWM_KHZ 10    // Backlight PWM dimming frequency
 #define SD_SPI_CLK_HZ 5 * 1000 * 1000
+#define BOOTLOADER_BUTTON_TIME_MS 2000  // Length of time in ms that L/R buttons must be held to enter bootloader mode
+#define BUTTON_LONG_PRESS_MS 500        // Length of time in ms a button must be held to be considered a long press
+
 
 /* Pinout */
 
@@ -128,6 +132,16 @@ typedef enum
 
 extern uint8_t rtc_connected;
 extern uint8_t rtc_time_valid;
+
+// External load functions
+typedef enum
+{
+    LOAD_MODE_NONE,                 // Output kept off
+    LOAD_MODE_ALWAYS_ON,            // Output turns on when display is powered
+    LOAD_MODE_ALWAYS_ON_BLINK,      // Output toggles at fixed rate, to drive turn signal lights
+    LOAD_MODE_AUTO_LIGHT_AT_DUSK,   // Output turns on at dusk, off at dawn. Relies on RTC time
+    LOAD_MODE_BRAKE_LIGHT           // Output turns on when regen braking, for driving brake lights
+} ext_load_mode;
 
 
 /* Prototypes */

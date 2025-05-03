@@ -19,6 +19,7 @@ typedef struct
     uint8_t disp_brightness = 0;
     uint32_t log_num = 0;
     float odometer = 0.0;
+    uint8_t load_modes = 0;
 } nv_flash_struct;
 
 
@@ -29,14 +30,11 @@ class nv_flash_storage
 
     public:
         nv_flash_struct data;
-        nv_flash_storage(mutex_t *flash_write_lock);
+        void init(mutex_t *flash_write_lock);
         void store_data();
         uint8_t block_id;
         int8_t page_id;
 
 };
-
-extern mutex_t flash_lock;
-extern nv_flash_storage nv_settings;
 
 #endif /* NV_FLASH_H */

@@ -30,8 +30,6 @@ const char csv_head[] = "ms_today,input_voltage,temp_mos_max,temp_mos_1,temp_mos
 
 char log_filename[30] = "";
 
-log_data_t data_pt;
-
 
 FRESULT init_filesystem()
 {
@@ -277,7 +275,7 @@ FRESULT create_log_file()
 
 /// @brief 
 /// @return 
-FRESULT append_data_pt()
+FRESULT append_data_pt(log_data_t *data)
 {
     sd_card_t *pSD = sd_get_by_num(0);
     FIL log_fil;
@@ -303,11 +301,11 @@ FRESULT append_data_pt()
 
     // Write out one row worth of data
     uint16_t bytes_written;
-    f_printf(&log_fil, "%d,%f,%f,%f,%f,%f,", data_pt.ms_today, data_pt.v_in, data_pt.temp_mos, data_pt.temp_mos_1, data_pt.temp_mos_2, data_pt.temp_mos_3);
-    f_printf(&log_fil, "%f,%f,%f,%f,%f,", data_pt.temp_motor, data_pt.current_motor, data_pt.current_in, data_pt.id, data_pt.iq);
-    f_printf(&log_fil, "%f,%f,%f,%f,%f,", data_pt.rpm, data_pt.duty_now, data_pt.amp_hours, data_pt.amp_hours_charged, data_pt.watt_hours);
-    f_printf(&log_fil, "%f,%d,%d,%f,%d,", data_pt.watt_hours_charged, data_pt.tachometer, data_pt.tachometer_abs, data_pt.position, data_pt.fault_code);
-    bytes_written = f_printf(&log_fil, "%d,%f,%f,%f,%f,%f,%f,%f\n", data_pt.vesc_id, data_pt.vd, data_pt.vq, data_pt.p_in, data_pt.speed_kph, data_pt.adc1_decoded, data_pt.adc2_decoded,data_pt.odometer);
+    f_printf(&log_fil, "%d,%f,%f,%f,%f,%f,", data->ms_today, data->v_in, data->temp_mos, data->temp_mos_1, data->temp_mos_2, data->temp_mos_3);
+    f_printf(&log_fil, "%f,%f,%f,%f,%f,", data->temp_motor, data->current_motor, data->current_in, data->id, data->iq);
+    f_printf(&log_fil, "%f,%f,%f,%f,%f,", data->rpm, data->duty_now, data->amp_hours, data->amp_hours_charged, data->watt_hours);
+    f_printf(&log_fil, "%f,%d,%d,%f,%d,", data->watt_hours_charged, data->tachometer, data->tachometer_abs, data->position, data->fault_code);
+    bytes_written = f_printf(&log_fil, "%d,%f,%f,%f,%f,%f,%f,%f\n", data->vesc_id, data->vd, data->vq, data->p_in, data->speed_kph, data->adc1_decoded, data->adc2_decoded,data->odometer);
 
     if (bytes_written < 0)
     {

@@ -2,7 +2,6 @@
 #include <stdio.h>
 #include "pico/stdlib.h"
 #include "pico/multicore.h"
-#include "pico/bootrom.h"
 #include "pico/sync.h"
 #include "pico/cyw43_arch.h"
 
@@ -81,7 +80,7 @@ extern "C"
 #define OLED_WIDTH 128
 #define OLED_FRAMERATE 60
 
-#define BOOTLOADER_BUTTON_TIME 0.5     // time in seconds for buttons to be pressed before entering bootloader mode
+//#define BOOTLOADER_BUTTON_TIME 0.5     // time in seconds for buttons to be pressed before entering bootloader mode
 #define DISPLAY_RESET_BUTTON_TIME 2
 #define ODOMETER_UPDATE_INTERVAL_MS 100 // time between odometer updates
 
@@ -90,8 +89,6 @@ extern "C"
 #define BATT_TERMINAL_WIDTH 8
 #define BATT_TERMINAL_HEIGHT 3
 
-#define U8LOG_WIDTH 48
-#define U8LOG_HEIGHT 12
 
 // function prototypes
 void draw_battery_icon();
@@ -99,9 +96,7 @@ void draw_battery_icon();
 void core1_entry();
 
 
-// u8g2_t u8g2;
-// u8log_t u8g2log;
-uint8_t u8log_buf[U8LOG_WIDTH*U8LOG_HEIGHT];
+
 
 
 
@@ -126,7 +121,7 @@ uint8_t b_soc = 0;
 uint8_t pb_left_state, pb_left_prev_state;
 uint8_t pb_right_state, pb_right_prev_state;
 
-auto_init_mutex(float_mutex);
+
 
 pico_oled display(OLED_SSD1309, /*i2c_address=*/ 0x3C, /*screen_width=*/ 128, /*screen_height=*/ 64, /*reset_gpio=*/ 15); 
 
@@ -142,6 +137,8 @@ absolute_time_t prev_time_sample = current_time_ms;
 absolute_time_t buff_write_time;
 
 page_controller page_ctrl;
+log_data_t *data_pt;
+mutex_t *flash_mutex, *float_mutex;
 
 // Core 0
 int main()
@@ -180,71 +177,14 @@ int main()
     //u8g2_SetFont(&page_ctrl.u8g2, u8g2_font_t0_11_te);
     u8g2_SetFont(&page_ctrl.u8g2, u8g2_font_10x20_tf);
     u8g2_SetDrawColor(&page_ctrl.u8g2, 1);  
-    u8log_Init(&page_ctrl.u8log, U8LOG_WIDTH, U8LOG_HEIGHT, u8log_buf);
 
     cyw43_arch_init();    
 
-    // uint8_t bx, by;     // box x,y
-    // int8_t xdir, ydir;
-    // char print_buf[100];
-    // uint8_t rxdata;
-    // int ret;
-
-    // u8log_Init(&u8g2log, U8LOG_WIDTH, U8LOG_HEIGHT, u8log_buf);
-    // u8g2_SetFont(&u8g2, u8g2_font_t0_11_te);
-
-    // // Scan I2C address range
-    // sprintf(print_buf, "Scanning I2C address range..\n");
-    // //u8log_WriteString(&u8g2log, print_buf);  
-    // print_ulog(print_buf);
-    // sprintf(print_buf, "   0 1 2 3 4 5 6 7 8 9 A B C D E F\n");
-    // // u8log_WriteString(&u8g2log, print_buf);      
-    // print_ulog(print_buf);
-
-    // for (int addr = 0; addr < (1 << 7); ++addr)
-    // {
-    //     if (addr % 16 == 0)        
-    //     {
-    //         sprintf(print_buf, "%02x ", addr);
-    //         u8log_WriteString(&u8g2log, print_buf);              
-    //     }
-    //     // Skip reserved addresses
-    //     if ((addr & 0x78) == 0 || (addr & 0x78) == 0x78)
-    //         ret = PICO_ERROR_GENERIC;
-    //     else
-    //         ret = i2c_read_blocking(i2c0, addr, &rxdata, 1, false);
-
-    //     sprintf(print_buf, ret < 0 ? "." : "@");
-    //     u8log_WriteString(&u8g2log, print_buf);          
-
-    //     sprintf(print_buf, addr % 16 == 15 ? "\n" : " ");
-    //     u8log_WriteString(&u8g2log, print_buf);              
-    // }
-
-    // RTC testing
-    // datetime_t ext_rtc_time;
-    // uint8_t write_val = 0xAA;
-    // uint8_t read_val;
-    // set_rtc_sram(DS1307_SRAM_START+1, &write_val, 1);
-    // get_rtc_sram(DS1307_SRAM_START+1, &read_val, 1);
-    // sprintf(print_buf, "RTC SRAM 0x%02x = 0x%02x\n", DS1307_SRAM_START+1, read_val);
-    // u8log_WriteString(&u8g2log, print_buf);      
-
-
-    // bx = by = 0;
-    // xdir = ydir = 1;
-    // char print_buf[100];
-    // u8g2_SetFont(&page_ctrl.u8g2, u8g2_font_t0_11_te);
-    // u8g2_DrawStr(&page_ctrl.u8g2, 0, 12, "TEST");
-
-    // sprintf(print_buf, "LOCAL U8: 0x%8X, LOG: 0x%8X", &page_ctrl.u8g2, &page_ctrl.u8log);  
-    // u8g2_DrawStr(&page_ctrl.u8g2, 0, 24, print_buf);
-
-    // // sprintf(print_buf, "OBJ.  U8: 0x%8X, LOG: 0x%8X", page_ctrl.u8g2_p, page_ctrl.u8log_p);  
-    // // u8g2_DrawStr(&page_ctrl.u8g2, 0, 36, print_buf);    
-
-    // u8g2_SendBuffer(&page_ctrl.u8g2);
-    // sleep_ms(1000);
+    // Set up some pointers that core1 needs to access
+    data_pt = &page_ctrl.esc_data; 
+    flash_mutex = &page_ctrl.flash_mutex;
+    float_mutex = &page_ctrl.float_mutex;
+    multicore_launch_core1(core1_entry);
 
     next_frame_time = get_absolute_time();
     while(1)
@@ -255,55 +195,10 @@ int main()
         page_ctrl.update();
         page_ctrl.draw_page();
 
-    
-        //sprintf(print_buf, "buff_write_time: %lld us", absolute_time_diff_us(current_time_ms, buff_write_time));
-        //u8g2_DrawStr(&u8g2, 0, 116, print_buf);
-        
-
-
-        // sprintf(print_buf, "x=%d  y=%d\n", bx, by);
-        // u8log_WriteString(&u8g2log, print_buf);
-
-        // bx += xdir;
-        // by += ydir;
-
-        // // Flip directions at limits
-        // if (xdir == 1 && bx >= u8g2_GetDisplayWidth(&u8g2)-16)
-        //     xdir = -1;
-        // else if (xdir == -1 && bx == 0)
-        //     xdir = 1;
-        // if (ydir == 1 && by >= u8g2_GetDisplayHeight(&u8g2)-16)
-        //     ydir = -1;
-        // else if (ydir == -1 && by == 0)
-        //     ydir = 1;        
-
-        // get_rtc_time(&ext_rtc_time);
-        // sprintf(print_buf, "%4d-%02d-%02d %02d:%02d:%02d\r", 
-        //     ext_rtc_time.year,
-        //     ext_rtc_time.month,
-        //     ext_rtc_time.day,
-        //     ext_rtc_time.hour,
-        //     ext_rtc_time.min,
-        //     ext_rtc_time.sec
-        // );
-        // u8log_WriteString(&u8g2log, print_buf);             
-
-
-        // u8g2_DrawLog(&u8g2, 0, 12, &u8g2log);    // Draw log text area
-
-        // u8g2_SetDrawColor(&u8g2, 2);    // xor mode for box
-        // u8g2_DrawBox(&u8g2, bx, by, 16, 16);
-        // u8g2_SetDrawColor(&u8g2, 1);
-
-        // // Track time taken to send buffer to display
-        // current_time_ms = get_absolute_time();
-        // u8g2_SendBuffer(&u8g2);
-        // buff_write_time = get_absolute_time();
 
     }
 
-    // Start core 1
-    multicore_launch_core1(core1_entry);
+
 
 
 
@@ -311,364 +206,364 @@ int main()
     // Display Setup
 
     // Gauges setup
-    #define MAX_KPH 60
-    #define TEXT_UNDER_SPEEDO_Y_START 32
+    // #define MAX_KPH 60
+    // #define TEXT_UNDER_SPEEDO_Y_START 32
 
 
-    analog_gauge speed_gauge(&display);
-    speed_gauge.set_position(OLED_WIDTH/2 - 1, 120);
-    speed_gauge.set_scale(0,MAX_KPH, 250, 290);
-    speed_gauge.set_markers(6, 106, 12, 1);
+    // analog_gauge speed_gauge(&display);
+    // speed_gauge.set_position(OLED_WIDTH/2 - 1, 120);
+    // speed_gauge.set_scale(0,MAX_KPH, 250, 290);
+    // speed_gauge.set_markers(6, 106, 12, 1);
 
-    char temp_str[20];
-    uint8_t temp_str_x, temp_str_y;
+    // char temp_str[20];
+    // uint8_t temp_str_x, temp_str_y;
 
-    #define ROLLING_AVG_RATIO 0.3
+    // #define ROLLING_AVG_RATIO 0.3
 
-    int64_t time_between_odometer_check_ms = 0;
+    // int64_t time_between_odometer_check_ms = 0;
 
-    float odometer = nv_settings.data.odometer; // todo: change to use data_pt.odometer when code is ready
+    // float odometer = nv_settings.data.odometer; // todo: change to use data_pt.odometer when code is ready
     
 
    
-    enum state {DefaultState, AnalogSpeedState,DebugState};
-    state display_state = DefaultState;
-
-    while(true)
-    {
-        // Limit framerate to OLED_FRAMERATE
-        sleep_until(next_frame_time);
-        current_time_ms = get_absolute_time();
-        next_frame_time = delayed_by_ms(next_frame_time, 1000 / OLED_FRAMERATE);
-
-
-        // TODO: Button reads. 
-        // Go into bootloader when both buttons pressed for 3 seconds
-        // check if both buttons are pressed. start timer 
-        // if button has been pressed again after set time, activate bootloader
-
-        pb_right_prev_state = pb_right_state;
-        pb_left_prev_state = pb_left_state;
-
-        pb_right_state = debouncer.read(PB_RIGHT_GPIO);
-        pb_left_state = debouncer.read(PB_LEFT_GPIO);
-        
-    
-        // if either button is not pressed reset current time
-        if (pb_left_state || pb_right_state)
-        {
-            //store current time
-            bootloader_timer_ms = get_absolute_time();
-        }
-
-        // if current time - bootloader_timer_ms > 3 seconds, enter bootloader
-        if (absolute_time_diff_us(bootloader_timer_ms,get_absolute_time()) > BOOTLOADER_BUTTON_TIME * 1E06)
-        {
-            // ENTER BOOTLOADER
-            display.fill(0);
-            display.set_cursor(0,OLED_HEIGHT/2);
-            display.print("----ENTERING BOOTLOADER----");
-            display.render();
-            sleep_ms(100);
-            reset_usb_boot(0,0);
-        }
-
-        // If left button has been pressed for DISPLAY_RESET_BUTTON_TIME
-        // TODO: fix this to use correct timer
-        if(absolute_time_diff_us(bootloader_timer_ms,get_absolute_time()) > DISPLAY_RESET_BUTTON_TIME * 1E06)
-        {
-            // Reset display
-            left_button_timer = get_absolute_time();
-            display.oled_init();
-        }
-        
-
-        // If left PB was just pressed, decrease brightness
-        if (!pb_left_state && pb_left_prev_state)
-        {
-            nv_settings.data.disp_brightness -= 16;
-            display.set_brightness(nv_settings.data.disp_brightness);
-            nv_settings.store_data();
-        }
-
-        // If right PB was just pressed, increase brightness
-        if (!pb_right_state && pb_right_prev_state)
-        {
-            nv_settings.data.disp_brightness += 16;
-            display.set_brightness(nv_settings.data.disp_brightness);       
-            nv_settings.store_data();                 
-        }
-
-
-        // Other calculations 
-        // Speed calculation
-        // core 1 should be doing speed calculations
-        // // KPH = ERPM / Pole Pairs * wheel diameter(mm)/1000000 * PI * 60 min/hour
-        // kph = float(m_erpm_avg/23 * 660/1000000 * 3.1415 * 60);
-
-        // // Odometer calculation
-        // // Distance = avg Speed * time
-        // static float average_speed = 0;
-        // static float time_hours = 0;
-        // static float distance_travelled = 0;
-        // // if time has been at least ODOMETER_UPDATE_INTERVAL_MS, calculate distance traveled and add to odometer
-        // time_between_odometer_check_ms = absolute_time_diff_us(last_odometer_count,current_time_ms)/1000;
-
-        // if (time_between_odometer_check_ms >= ODOMETER_UPDATE_INTERVAL_MS)
-        // {
-        //     average_speed = abs((kph + prev_kph_for_odometer))/2;
-        //     time_hours = time_between_odometer_check_ms/3600.0/1000.0;// convert kph * ms to km (odo)
-        //     distance_travelled = average_speed * time_hours;
-        //     odometer += distance_travelled;
-        //     prev_kph_for_odometer = kph;
-        //     last_odometer_count = current_time_ms;
-        // }
-        
-        
+    // enum state {DefaultState, AnalogSpeedState,DebugState};
+    // state display_state = DefaultState;
 
     
-        // Start display stuff
-        display.fill(0);
-
-        mutex_enter_blocking(&float_mutex);
-
-        // Update rolling averages
-        b_cur_avg = (1 - ROLLING_AVG_RATIO) * b_cur_avg + ROLLING_AVG_RATIO * data_pt.current_in;
-        b_volts_avg = (1 - ROLLING_AVG_RATIO) * b_volts_avg + ROLLING_AVG_RATIO * data_pt.v_in;
-
-        // for now hardcode 13S battery Full =54.6V empty = 39V (3.0/cell) (delta V = 15.6)
-        b_soc = MIN(((b_volts_avg - 39.0) * 100 / 15.6), 100); // Get scale from min to max batt V
-
-        #ifdef DEBUG
-
-        // Set to Debug state
-        display_state = DebugState;
-
-        //DEBUG: use buttons to change speed
-        if(pb_left_state == 0)
-            data_pt.rpm -= 600.0;   
-        if(pb_right_state == 0)
-            data_pt.rpm += 600.0;
-        #else
-        m_erpm_avg = (1 - ROLLING_AVG_RATIO) * m_erpm_avg + ROLLING_AVG_RATIO * abs(data_pt.rpm);
-        #endif
+    // while(true)
+    // {
+    //     // Limit framerate to OLED_FRAMERATE
+    //     sleep_until(next_frame_time);
+    //     current_time_ms = get_absolute_time();
+    //     next_frame_time = delayed_by_ms(next_frame_time, 1000 / OLED_FRAMERATE);
 
 
-        ////////////////////////////////////////////////////////////////////////////////////////////////
-        switch (display_state)
-        {
-        case DefaultState:
-            {// TODO:
-            // minimalist display with big font and ez to read
-            /*
-            BATTERY ICON
-            TEMP
-            SPEED
-            POWER
-            */
-            draw_battery_icon();
+    //     // TODO: Button reads. 
+    //     // Go into bootloader when both buttons pressed for 3 seconds
+    //     // check if both buttons are pressed. start timer 
+    //     // if button has been pressed again after set time, activate bootloader
 
-            // Draw small text stuff
-            // // TODO: Display throttle intensity visually (ADC1) next to regen (ADC2)
-            #define THROTTLE_BAR_WIDTH 5
-            #define THROTTLE_BAR_HEIGHT 20
+    //     pb_right_prev_state = pb_right_state;
+    //     pb_left_prev_state = pb_left_state;
 
-
-            display.set_cursor(OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH*2, 10);
-            display.print("T\nH\nR\nO\nT");
-
-            display.set_cursor(OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH + 1, 10);
-            display.print("R\nE\nG\nE\nN");
-
-            // Draw Throttle bar
-            display.draw_vbar(data_pt.adc1_decoded*100, OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH*2, OLED_HEIGHT - 1 - THROTTLE_BAR_HEIGHT, OLED_WIDTH - 1-THROTTLE_BAR_WIDTH, OLED_HEIGHT - 1);
-            // Draw Regen Bar
-            display.draw_vbar(data_pt.adc2_decoded*100, OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH, OLED_HEIGHT - 1 - THROTTLE_BAR_HEIGHT, OLED_WIDTH - 1, OLED_HEIGHT - 1);
-            
-
-            // TODO: Display FET/MOTOR temperature and bar graph and change max temp to non hardcode
-            #define TEMP_BAR_X 70
-            #define TEMP_BAR_HEIGHT 5
-            #define FET_TEMP_Y 0
-            #define MOTOR_TEMP_Y (FET_TEMP_Y + 5 + 1)
+    //     pb_right_state = debouncer.read(PB_RIGHT_GPIO);
+    //     pb_left_state = debouncer.read(PB_LEFT_GPIO);
         
-            display.set_cursor(24, 0);
-            display.print_num("FETS: %2.0fC", data_pt.temp_mos);
-            display.draw_hbar(data_pt.temp_mos/110.0 * 100.0,0, TEMP_BAR_X,0,110,TEMP_BAR_HEIGHT);
+    
+    //     // if either button is not pressed reset current time
+    //     if (pb_left_state || pb_right_state)
+    //     {
+    //         //store current time
+    //         bootloader_timer_ms = get_absolute_time();
+    //     }
+
+    //     // // if current time - bootloader_timer_ms > 3 seconds, enter bootloader
+    //     // if (absolute_time_diff_us(bootloader_timer_ms,get_absolute_time()) > BOOTLOADER_BUTTON_TIME * 1E06)
+    //     // {
+    //     //     // ENTER BOOTLOADER
+    //     //     display.fill(0);
+    //     //     display.set_cursor(0,OLED_HEIGHT/2);
+    //     //     display.print("----ENTERING BOOTLOADER----");
+    //     //     display.render();
+    //     //     sleep_ms(100);
+    //     //     reset_usb_boot(0,0);
+    //     // }
+
+    //     // If left button has been pressed for DISPLAY_RESET_BUTTON_TIME
+    //     // TODO: fix this to use correct timer
+    //     // if(absolute_time_diff_us(bootloader_timer_ms,get_absolute_time()) > DISPLAY_RESET_BUTTON_TIME * 1E06)
+    //     // {
+    //     //     // Reset display
+    //     //     left_button_timer = get_absolute_time();
+    //     //     display.oled_init();
+    //     // }
+        
+
+    //     // If left PB was just pressed, decrease brightness
+    //     // if (!pb_left_state && pb_left_prev_state)
+    //     // {
+    //     //     nv_settings.data.disp_brightness -= 16;
+    //     //     display.set_brightness(nv_settings.data.disp_brightness);
+    //     //     nv_settings.store_data();
+    //     // }
+
+    //     // // If right PB was just pressed, increase brightness
+    //     // if (!pb_right_state && pb_right_prev_state)
+    //     // {
+    //     //     nv_settings.data.disp_brightness += 16;
+    //     //     display.set_brightness(nv_settings.data.disp_brightness);       
+    //     //     nv_settings.store_data();                 
+    //     // }
+
+
+    //     // Other calculations 
+    //     // Speed calculation
+    //     // core 1 should be doing speed calculations
+    //     // // KPH = ERPM / Pole Pairs * wheel diameter(mm)/1000000 * PI * 60 min/hour
+    //     // kph = float(m_erpm_avg/23 * 660/1000000 * 3.1415 * 60);
+
+    //     // // Odometer calculation
+    //     // // Distance = avg Speed * time
+    //     // static float average_speed = 0;
+    //     // static float time_hours = 0;
+    //     // static float distance_travelled = 0;
+    //     // // if time has been at least ODOMETER_UPDATE_INTERVAL_MS, calculate distance traveled and add to odometer
+    //     // time_between_odometer_check_ms = absolute_time_diff_us(last_odometer_count,current_time_ms)/1000;
+
+    //     // if (time_between_odometer_check_ms >= ODOMETER_UPDATE_INTERVAL_MS)
+    //     // {
+    //     //     average_speed = abs((kph + prev_kph_for_odometer))/2;
+    //     //     time_hours = time_between_odometer_check_ms/3600.0/1000.0;// convert kph * ms to km (odo)
+    //     //     distance_travelled = average_speed * time_hours;
+    //     //     odometer += distance_travelled;
+    //     //     prev_kph_for_odometer = kph;
+    //     //     last_odometer_count = current_time_ms;
+    //     // }
+        
+        
+
+    
+    //     // Start display stuff
+    //     display.fill(0);
+
+    //     mutex_enter_blocking(&float_mutex);
+
+    //     // Update rolling averages
+    //     b_cur_avg = (1 - ROLLING_AVG_RATIO) * b_cur_avg + ROLLING_AVG_RATIO * data_pt.current_in;
+    //     b_volts_avg = (1 - ROLLING_AVG_RATIO) * b_volts_avg + ROLLING_AVG_RATIO * data_pt.v_in;
+
+    //     // for now hardcode 13S battery Full =54.6V empty = 39V (3.0/cell) (delta V = 15.6)
+    //     b_soc = MIN(((b_volts_avg - 39.0) * 100 / 15.6), 100); // Get scale from min to max batt V
+
+    //     // #ifdef DEBUG
+
+    //     // // Set to Debug state
+    //     // display_state = DebugState;
+
+    //     // //DEBUG: use buttons to change speed
+    //     // if(pb_left_state == 0)
+    //     //     data_pt.rpm -= 600.0;   
+    //     // if(pb_right_state == 0)
+    //     //     data_pt.rpm += 600.0;
+    //     // #else
+    //     // m_erpm_avg = (1 - ROLLING_AVG_RATIO) * m_erpm_avg + ROLLING_AVG_RATIO * abs(data_pt.rpm);
+    //     // #endif
+
+
+    //     ////////////////////////////////////////////////////////////////////////////////////////////////
+    //     switch (display_state)
+    //     {
+    //     case DefaultState:
+    //         {// TODO:
+    //         // minimalist display with big font and ez to read
+    //         /*
+    //         BATTERY ICON
+    //         TEMP
+    //         SPEED
+    //         POWER
+    //         */
+    //         draw_battery_icon();
+
+    //         // Draw small text stuff
+    //         // // TODO: Display throttle intensity visually (ADC1) next to regen (ADC2)
+    //         #define THROTTLE_BAR_WIDTH 5
+    //         #define THROTTLE_BAR_HEIGHT 20
+
+
+    //         display.set_cursor(OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH*2, 10);
+    //         display.print("T\nH\nR\nO\nT");
+
+    //         display.set_cursor(OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH + 1, 10);
+    //         display.print("R\nE\nG\nE\nN");
+
+    //         // Draw Throttle bar
+    //         display.draw_vbar(data_pt.adc1_decoded*100, OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH*2, OLED_HEIGHT - 1 - THROTTLE_BAR_HEIGHT, OLED_WIDTH - 1-THROTTLE_BAR_WIDTH, OLED_HEIGHT - 1);
+    //         // Draw Regen Bar
+    //         display.draw_vbar(data_pt.adc2_decoded*100, OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH, OLED_HEIGHT - 1 - THROTTLE_BAR_HEIGHT, OLED_WIDTH - 1, OLED_HEIGHT - 1);
             
 
-            display.set_cursor(24, MOTOR_TEMP_Y);
-            display.print_num("MOT: %2.0fC", data_pt.temp_motor);
-            display.draw_hbar(data_pt.temp_motor/110.0 * 100.0,0, TEMP_BAR_X,MOTOR_TEMP_Y,110,MOTOR_TEMP_Y + TEMP_BAR_HEIGHT);
+    //         // TODO: Display FET/MOTOR temperature and bar graph and change max temp to non hardcode
+    //         #define TEMP_BAR_X 70
+    //         #define TEMP_BAR_HEIGHT 5
+    //         #define FET_TEMP_Y 0
+    //         #define MOTOR_TEMP_Y (FET_TEMP_Y + 5 + 1)
+        
+    //         display.set_cursor(24, 0);
+    //         display.print_num("FETS: %2.0fC", data_pt.temp_mos);
+    //         display.draw_hbar(data_pt.temp_mos/110.0 * 100.0,0, TEMP_BAR_X,0,110,TEMP_BAR_HEIGHT);
+            
 
-            // Display odometer
-            display.set_cursor(24, MOTOR_TEMP_Y + TEMP_BAR_HEIGHT + 1);
-            display.print_num("ODO: %2.3f km", data_pt.odometer);
+    //         display.set_cursor(24, MOTOR_TEMP_Y);
+    //         display.print_num("MOT: %2.0fC", data_pt.temp_motor);
+    //         display.draw_hbar(data_pt.temp_motor/110.0 * 100.0,0, TEMP_BAR_X,MOTOR_TEMP_Y,110,MOTOR_TEMP_Y + TEMP_BAR_HEIGHT);
+
+    //         // Display odometer
+    //         display.set_cursor(24, MOTOR_TEMP_Y + TEMP_BAR_HEIGHT + 1);
+    //         display.print_num("ODO: %2.3f km", data_pt.odometer);
             
 
 
 
-            // Draw big text stuff
-            // KPH = ERPM / Pole Pairs * wheel diameter(mm)/1000000 * PI * 60 min/hour
-            // 
-            // TODO: lots of temp stuff. Need to get big font for KPH and W letters
+    //         // Draw big text stuff
+    //         // KPH = ERPM / Pole Pairs * wheel diameter(mm)/1000000 * PI * 60 min/hour
+    //         // 
+    //         // TODO: lots of temp stuff. Need to get big font for KPH and W letters
             
-            display.set_font(future_real);
+    //         display.set_font(future_real);
            
-            sprintf(temp_str, "%.0f", data_pt.speed_kph);
-            display.get_str_dimensions(temp_str, &temp_str_x, &temp_str_y);
+    //         sprintf(temp_str, "%.0f", data_pt.speed_kph);
+    //         display.get_str_dimensions(temp_str, &temp_str_x, &temp_str_y);
 
 
 
-            // Display Speed text
-            display.set_cursor(OLED_WIDTH/2 - 1 - (temp_str_x/2), 20);
-            display.print(temp_str);
+    //         // Display Speed text
+    //         display.set_cursor(OLED_WIDTH/2 - 1 - (temp_str_x/2), 20);
+    //         display.print(temp_str);
 
-            // Display Power on next row
-            sprintf(temp_str, "%.0f", b_cur_avg * b_volts_avg);
-            display.get_str_dimensions(temp_str, &temp_str_x, &temp_str_y);      
-            display.set_cursor(OLED_WIDTH/2 - 1 - (temp_str_x/2), 20 + display.get_font_height() + 1);       
-            display.print(temp_str);
+    //         // Display Power on next row
+    //         sprintf(temp_str, "%.0f", b_cur_avg * b_volts_avg);
+    //         display.get_str_dimensions(temp_str, &temp_str_x, &temp_str_y);      
+    //         display.set_cursor(OLED_WIDTH/2 - 1 - (temp_str_x/2), 20 + display.get_font_height() + 1);       
+    //         display.print(temp_str);
 
             
            
-           // draw temp
-           // draw speed
-           // draw power
-           //
+    //        // draw temp
+    //        // draw speed
+    //        // draw power
+    //        //
 
-            display.set_font(too_simple); // reset to the small font
-            break;
-            }
-        case AnalogSpeedState:
-            {// Display battery voltage visually and numerically
-            // TODO: Get max Batt V from vesc for auto ranging soc value
+    //         display.set_font(too_simple); // reset to the small font
+    //         break;
+    //         }
+    //     case AnalogSpeedState:
+    //         {// Display battery voltage visually and numerically
+    //         // TODO: Get max Batt V from vesc for auto ranging soc value
             
-            #define BATT_TERMINAL_TOP_LEFT_X 4
-            #define BATT_TERMINAL_TOP_LEFT_Y 15
-            #define BATT_TERMINAL_WIDTH 8
-            #define BATT_TERMINAL_HEIGHT 3
+    //         #define BATT_TERMINAL_TOP_LEFT_X 4
+    //         #define BATT_TERMINAL_TOP_LEFT_Y 15
+    //         #define BATT_TERMINAL_WIDTH 8
+    //         #define BATT_TERMINAL_HEIGHT 3
 
-            display.draw_vbar(b_soc, 0, 18, 15, OLED_HEIGHT - 1); // Battery icon outline
-            display.fill_rect(0, BATT_TERMINAL_TOP_LEFT_X, BATT_TERMINAL_TOP_LEFT_Y, BATT_TERMINAL_TOP_LEFT_X + BATT_TERMINAL_WIDTH, BATT_TERMINAL_TOP_LEFT_Y + BATT_TERMINAL_HEIGHT); // Draw block to represent battery terminal
+    //         display.draw_vbar(b_soc, 0, 18, 15, OLED_HEIGHT - 1); // Battery icon outline
+    //         display.fill_rect(0, BATT_TERMINAL_TOP_LEFT_X, BATT_TERMINAL_TOP_LEFT_Y, BATT_TERMINAL_TOP_LEFT_X + BATT_TERMINAL_WIDTH, BATT_TERMINAL_TOP_LEFT_Y + BATT_TERMINAL_HEIGHT); // Draw block to represent battery terminal
 
-            // Batt Voltage and Current text
-            display.set_cursor(2, 0);
-            display.print_num("%.1fV", b_volts_avg);
-            display.set_cursor(2,display.get_font_height());
-            display.print_num("%.0fA", b_cur_avg);
+    //         // Batt Voltage and Current text
+    //         display.set_cursor(2, 0);
+    //         display.print_num("%.1fV", b_volts_avg);
+    //         display.set_cursor(2,display.get_font_height());
+    //         display.print_num("%.0fA", b_cur_avg);
 
-            // Display Speed on gauge
+    //         // Display Speed on gauge
 
-            speed_gauge.set_value(data_pt.speed_kph);
-            speed_gauge.draw();
-            sprintf(temp_str, "%.1f KPH", data_pt.speed_kph);
-            display.get_str_dimensions(temp_str, &temp_str_x, &temp_str_y);
-
-
-            // Blank out underneath text (1 pixel bigger than text box)
-            display.fill_rect(1, OLED_WIDTH/2 - 1 - (temp_str_x/2) - 1, TEXT_UNDER_SPEEDO_Y_START, OLED_WIDTH/2 - 1 + (temp_str_x/2), TEXT_UNDER_SPEEDO_Y_START + 2*temp_str_y+1);
-
-            // Display Speed text
-            display.set_cursor(OLED_WIDTH/2 - 1 - (temp_str_x/2), TEXT_UNDER_SPEEDO_Y_START);
-            display.print(temp_str);
-
-            // Display Power
-            sprintf(temp_str, "%.0fW", b_cur_avg * b_volts_avg);
-            display.get_str_dimensions(temp_str, &temp_str_x, &temp_str_y);      
-            display.set_cursor(OLED_WIDTH/2 - 1 - (temp_str_x/2), TEXT_UNDER_SPEEDO_Y_START + display.get_font_height() + 1);       
-            display.print(temp_str);
+    //         speed_gauge.set_value(data_pt.speed_kph);
+    //         speed_gauge.draw();
+    //         sprintf(temp_str, "%.1f KPH", data_pt.speed_kph);
+    //         display.get_str_dimensions(temp_str, &temp_str_x, &temp_str_y);
 
 
-            // Display watt-hours charged numerically
-            // TODO Watt hours used instead
-            // display.fill_rect(1, 18, 52, 117, OLED_HEIGHT - 1);  // Blank out area where text will draw
-            // display.set_cursor(19, 54);
-            // display.print_num("WATT-HRS GENERATED: %.1f", data_pt.watt_hours_charged);
+    //         // Blank out underneath text (1 pixel bigger than text box)
+    //         display.fill_rect(1, OLED_WIDTH/2 - 1 - (temp_str_x/2) - 1, TEXT_UNDER_SPEEDO_Y_START, OLED_WIDTH/2 - 1 + (temp_str_x/2), TEXT_UNDER_SPEEDO_Y_START + 2*temp_str_y+1);
 
-            // // TODO: Display throttle intensity visually (ADC1) next to regen (ADC2)
-            #define THROTTLE_BAR_WIDTH 5
-            #define THROTTLE_BAR_HEIGHT 20
+    //         // Display Speed text
+    //         display.set_cursor(OLED_WIDTH/2 - 1 - (temp_str_x/2), TEXT_UNDER_SPEEDO_Y_START);
+    //         display.print(temp_str);
+
+    //         // Display Power
+    //         sprintf(temp_str, "%.0fW", b_cur_avg * b_volts_avg);
+    //         display.get_str_dimensions(temp_str, &temp_str_x, &temp_str_y);      
+    //         display.set_cursor(OLED_WIDTH/2 - 1 - (temp_str_x/2), TEXT_UNDER_SPEEDO_Y_START + display.get_font_height() + 1);       
+    //         display.print(temp_str);
 
 
-            display.set_cursor(OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH*2, 10);
-            display.print("T\nH\nR\nO\nT");
+    //         // Display watt-hours charged numerically
+    //         // TODO Watt hours used instead
+    //         // display.fill_rect(1, 18, 52, 117, OLED_HEIGHT - 1);  // Blank out area where text will draw
+    //         // display.set_cursor(19, 54);
+    //         // display.print_num("WATT-HRS GENERATED: %.1f", data_pt.watt_hours_charged);
 
-            display.set_cursor(OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH + 1, 10);
-            display.print("R\nE\nG\nE\nN");
+    //         // // TODO: Display throttle intensity visually (ADC1) next to regen (ADC2)
+    //         #define THROTTLE_BAR_WIDTH 5
+    //         #define THROTTLE_BAR_HEIGHT 20
 
-            // Draw Throttle bar
-            display.draw_vbar(data_pt.adc1_decoded*100, OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH*2, OLED_HEIGHT - 1 - THROTTLE_BAR_HEIGHT, OLED_WIDTH - 1-THROTTLE_BAR_WIDTH, OLED_HEIGHT - 1);
-            // Draw Regen Bar
-            display.draw_vbar(data_pt.adc2_decoded*100, OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH, OLED_HEIGHT - 1 - THROTTLE_BAR_HEIGHT, OLED_WIDTH - 1, OLED_HEIGHT - 1);
-            
 
-            // TODO: Display FET/MOTOR temperature and bar graph and change max temp to non hardcode
-            #define TEMP_BAR_X 70
-            #define TEMP_BAR_HEIGHT 5
-            #define FET_TEMP_Y 0
-            #define MOTOR_TEMP_Y (FET_TEMP_Y + 5 + 1)
-        
-            display.set_cursor(24, 0);
-            display.print_num("FETS: %2.0fC", data_pt.temp_mos);
-            display.draw_hbar(data_pt.temp_mos/110.0 * 100.0,0, TEMP_BAR_X,0,110,TEMP_BAR_HEIGHT);
+    //         display.set_cursor(OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH*2, 10);
+    //         display.print("T\nH\nR\nO\nT");
+
+    //         display.set_cursor(OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH + 1, 10);
+    //         display.print("R\nE\nG\nE\nN");
+
+    //         // Draw Throttle bar
+    //         display.draw_vbar(data_pt.adc1_decoded*100, OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH*2, OLED_HEIGHT - 1 - THROTTLE_BAR_HEIGHT, OLED_WIDTH - 1-THROTTLE_BAR_WIDTH, OLED_HEIGHT - 1);
+    //         // Draw Regen Bar
+    //         display.draw_vbar(data_pt.adc2_decoded*100, OLED_WIDTH - 1 - THROTTLE_BAR_WIDTH, OLED_HEIGHT - 1 - THROTTLE_BAR_HEIGHT, OLED_WIDTH - 1, OLED_HEIGHT - 1);
             
 
-            display.set_cursor(24, MOTOR_TEMP_Y);
-            display.print_num("MOT: %2.0fC", data_pt.temp_motor);
-            display.draw_hbar(data_pt.temp_motor/110.0 * 100.0,0, TEMP_BAR_X,MOTOR_TEMP_Y,110,MOTOR_TEMP_Y + TEMP_BAR_HEIGHT);
+    //         // TODO: Display FET/MOTOR temperature and bar graph and change max temp to non hardcode
+    //         #define TEMP_BAR_X 70
+    //         #define TEMP_BAR_HEIGHT 5
+    //         #define FET_TEMP_Y 0
+    //         #define MOTOR_TEMP_Y (FET_TEMP_Y + 5 + 1)
+        
+    //         display.set_cursor(24, 0);
+    //         display.print_num("FETS: %2.0fC", data_pt.temp_mos);
+    //         display.draw_hbar(data_pt.temp_mos/110.0 * 100.0,0, TEMP_BAR_X,0,110,TEMP_BAR_HEIGHT);
+            
 
-            // TODO: fps counter
-            // every second count how many frames
-            // fps += 1;
-            // if(absolute_time_diff_us(get_absolute_time(),next_fps_count) >= 0)
-            // {
-            //     // show fps in top right corner
-            //     display.set_cursor(OLED_WIDTH - 10,0);
-            //     display.print_num("%2.0", fps);
-            //     delayed_by_ms(next_fps_count,1000); // set next fps count timer
-            //     fps = 0; // 
-            // }
-            break;}
+    //         display.set_cursor(24, MOTOR_TEMP_Y);
+    //         display.print_num("MOT: %2.0fC", data_pt.temp_motor);
+    //         display.draw_hbar(data_pt.temp_motor/110.0 * 100.0,0, TEMP_BAR_X,MOTOR_TEMP_Y,110,MOTOR_TEMP_Y + TEMP_BAR_HEIGHT);
 
-        case DebugState:
-            {// Do debug stuff
+    //         // TODO: fps counter
+    //         // every second count how many frames
+    //         // fps += 1;
+    //         // if(absolute_time_diff_us(get_absolute_time(),next_fps_count) >= 0)
+    //         // {
+    //         //     // show fps in top right corner
+    //         //     display.set_cursor(OLED_WIDTH - 10,0);
+    //         //     display.print_num("%2.0", fps);
+    //         //     delayed_by_ms(next_fps_count,1000); // set next fps count timer
+    //         //     fps = 0; // 
+    //         // }
+    //         break;}
 
-            // do debug data here instead of getting from vesc
-            data_pt.speed_kph = float(data_pt.rpm/23.0 * 660/1000000 * 3.1415 * 60);
-            // average speed * time travelled * (kph * us to km conversion)
-            average_speed = (prev_kph + data_pt.speed_kph)/2;
-            time_us = absolute_time_diff_us(prev_time_sample,get_absolute_time());
-            distance_travelled = (double)(average_speed * time_us/(3600)); // distance travelled as mm
-            data_pt.odometer = (double)(data_pt.odometer +  distance_travelled/1000000.0); // convert distance_travelled to km and add to odo
-            // double check proper math is done and not truncated due to data types
+    //     case DebugState:
+    //         {// Do debug stuff
 
-            prev_kph = data_pt.speed_kph;
-            prev_time_sample = get_absolute_time();
+    //         // do debug data here instead of getting from vesc
+    //         data_pt.speed_kph = float(data_pt.rpm/23.0 * 660/1000000 * 3.1415 * 60);
+    //         // average speed * time travelled * (kph * us to km conversion)
+    //         average_speed = (prev_kph + data_pt.speed_kph)/2;
+    //         time_us = absolute_time_diff_us(prev_time_sample,get_absolute_time());
+    //         distance_travelled = (double)(average_speed * time_us/(3600)); // distance travelled as mm
+    //         data_pt.odometer = (double)(data_pt.odometer +  distance_travelled/1000000.0); // convert distance_travelled to km and add to odo
+    //         // double check proper math is done and not truncated due to data types
 
-            display.set_cursor(0,0);
-            char debug_string[200];
-            sprintf(debug_string,"odometer:%f\n\
-            kph:%f\n\
-            erpm:%f\n\
-            prev_kph:%f\n\
-            average_speed:%f\n\
-            time_us:%d\n\
-            distance_trv:%f\n\
-            ",data_pt.odometer,data_pt.speed_kph,data_pt.rpm,prev_kph,average_speed,time_us,distance_travelled);
-            display.print(debug_string);
+    //         prev_kph = data_pt.speed_kph;
+    //         prev_time_sample = get_absolute_time();
 
-        default:
-            break;}
-        }
+    //         display.set_cursor(0,0);
+    //         char debug_string[200];
+    //         sprintf(debug_string,"odometer:%f\n\
+    //         kph:%f\n\
+    //         erpm:%f\n\
+    //         prev_kph:%f\n\
+    //         average_speed:%f\n\
+    //         time_us:%d\n\
+    //         distance_trv:%f\n\
+    //         ",data_pt.odometer,data_pt.speed_kph,data_pt.rpm,prev_kph,average_speed,time_us,distance_travelled);
+    //         display.print(debug_string);
+
+    //     default:
+    //         break;}
+    //     }
 
         
         
 
-        mutex_exit(&float_mutex);
-        display.render();
-    }
-
+    //     mutex_exit(&float_mutex);
+    //     display.render();
+    // }
 }
 
 void draw_battery_icon()
@@ -745,7 +640,7 @@ void core1_entry()
     next_sample = get_absolute_time();
     while (true)
     {
-        mutex_enter_blocking(&flash_lock);  // Don't allow flash erase/write while running core1 code
+        mutex_enter_blocking(flash_mutex);  // Don't allow flash erase/write while running core1 code
 
         sleep_until(next_sample);
         next_sample = delayed_by_ms(next_sample, 1000 / LOG_SAMPLE_RATE);
@@ -820,14 +715,14 @@ void core1_entry()
         else if(sd_status == SD_PRESENT && vesc_connected)
         {
             gpio_put(DEBUG_GPIO, 0);
-            result = append_data_pt();
+            result = append_data_pt(data_pt);
             gpio_put(DEBUG_GPIO, 1);          
 
             DBG_PRINT("append_data_pt() returned with %d: %s\n", result, FRESULT_str(result));            
         }
 
 
-        mutex_exit(&flash_lock);    // Release lock
+        mutex_exit(flash_mutex);    // Release lock
     }
 }
 
@@ -849,68 +744,68 @@ void process_data(uint8_t *data, size_t len)
             // First 4 bytes are get_values_selective 32b mask
             idx += 4;
 
-            mutex_enter_blocking(&float_mutex);
+            mutex_enter_blocking(float_mutex);
 
             //memcpy(get_values_response, data+5, len-5);
 
-            data_pt.ms_today = time_us_64() / 1000;
+            data_pt->ms_today = time_us_64() / 1000;
 
             // Unpack data from VESC response
-            data_pt.temp_mos = buffer_get_float16(data, 1e1, &idx);
-            data_pt.temp_motor = buffer_get_float16(data, 1e1, &idx);
-            data_pt.current_motor = buffer_get_float32(data, 1e2, &idx);
-            data_pt.current_in = buffer_get_float32(data, 1e2, &idx);
-            data_pt.id = buffer_get_float32(data, 1e2, &idx);
-            data_pt.iq = buffer_get_float32(data, 1e2, &idx);
-            data_pt.duty_now = buffer_get_float16(data, 1e3, &idx);
-            data_pt.rpm = buffer_get_float32(data, 1e0, &idx);
-            data_pt.v_in = buffer_get_float16(data, 1e1, &idx);
-            data_pt.amp_hours = buffer_get_float32(data, 1e4, &idx);
-            data_pt.amp_hours_charged = buffer_get_float32(data, 1e4, &idx);
-            data_pt.watt_hours = buffer_get_float32(data, 1e4, &idx);
-            data_pt.watt_hours_charged = buffer_get_float32(data, 1e4, &idx);
-            data_pt.tachometer = buffer_get_int32(data, &idx);
-            data_pt.tachometer_abs = buffer_get_int32(data, &idx);
-            data_pt.fault_code = (mc_fault_code)data[idx++];
-            data_pt.position = buffer_get_float32(data, 1e6, &idx);
-            data_pt.vesc_id = data[idx++];
-            data_pt.temp_mos_1 = buffer_get_float16(data, 1e1, &idx);
-            data_pt.temp_mos_2 = buffer_get_float16(data, 1e1, &idx);
-            data_pt.temp_mos_3 = buffer_get_float16(data, 1e1, &idx);
-            data_pt.vd = buffer_get_float32(data, 1e3, &idx);
-            data_pt.vq = buffer_get_float32(data, 1e3, &idx);
+            data_pt->temp_mos = buffer_get_float16(data, 1e1, &idx);
+            data_pt->temp_motor = buffer_get_float16(data, 1e1, &idx);
+            data_pt->current_motor = buffer_get_float32(data, 1e2, &idx);
+            data_pt->current_in = buffer_get_float32(data, 1e2, &idx);
+            data_pt->id = buffer_get_float32(data, 1e2, &idx);
+            data_pt->iq = buffer_get_float32(data, 1e2, &idx);
+            data_pt->duty_now = buffer_get_float16(data, 1e3, &idx);
+            data_pt->rpm = buffer_get_float32(data, 1e0, &idx);
+            data_pt->v_in = buffer_get_float16(data, 1e1, &idx);
+            data_pt->amp_hours = buffer_get_float32(data, 1e4, &idx);
+            data_pt->amp_hours_charged = buffer_get_float32(data, 1e4, &idx);
+            data_pt->watt_hours = buffer_get_float32(data, 1e4, &idx);
+            data_pt->watt_hours_charged = buffer_get_float32(data, 1e4, &idx);
+            data_pt->tachometer = buffer_get_int32(data, &idx);
+            data_pt->tachometer_abs = buffer_get_int32(data, &idx);
+            data_pt->fault_code = (mc_fault_code)data[idx++];
+            data_pt->position = buffer_get_float32(data, 1e6, &idx);
+            data_pt->vesc_id = data[idx++];
+            data_pt->temp_mos_1 = buffer_get_float16(data, 1e1, &idx);
+            data_pt->temp_mos_2 = buffer_get_float16(data, 1e1, &idx);
+            data_pt->temp_mos_3 = buffer_get_float16(data, 1e1, &idx);
+            data_pt->vd = buffer_get_float32(data, 1e3, &idx);
+            data_pt->vq = buffer_get_float32(data, 1e3, &idx);
 
             // Calculated values
             // Power
-            data_pt.p_in = data_pt.current_in * data_pt.v_in;
+            data_pt->p_in = data_pt->current_in * data_pt->v_in;
             // Speed calculation
             // TODO: change hardcode wheel diameter and get from vesc
             // KPH = ERPM / Pole Pairs * wheel diameter(mm)/1000000 * PI * 60 min/hour
 
-            data_pt.speed_kph = float(data_pt.rpm/23.0 * 660/1000000 * 3.1415 * 60);
+            data_pt->speed_kph = float(data_pt->rpm/23.0 * 660/1000000 * 3.1415 * 60);
             
             // do debug data here instead of getting from vesc
-            data_pt.speed_kph = float(data_pt.rpm/23.0 * 660/1000000 * 3.1415 * 60);
+            data_pt->speed_kph = float(data_pt->rpm/23.0 * 660/1000000 * 3.1415 * 60);
             // average speed * time travelled * (kph * us to km conversion)
-            average_speed = (prev_kph + data_pt.speed_kph)/2;
+            average_speed = (prev_kph + data_pt->speed_kph)/2;
             time_us = absolute_time_diff_us(prev_time_sample,get_absolute_time());
             distance_travelled = (double)(average_speed * time_us/(3600)); // distance travelled as mm
-            data_pt.odometer = (double)(data_pt.odometer +  distance_travelled/1000000.0); // convert distance_travelled to km and add to odo
+            data_pt->odometer = (double)(data_pt->odometer +  distance_travelled/1000000.0); // convert distance_travelled to km and add to odo
             // double check proper math is done and not truncated due to data types
 
             //last byte is int8 status, but data_pt struct has no place for it
 
-            mutex_exit(&float_mutex);
+            mutex_exit(float_mutex);
             break;
 
         case COMM_GET_DECODED_ADC:
 
-            mutex_enter_blocking(&float_mutex);
-            data_pt.adc1_decoded = buffer_get_float32(data, 1e6, &idx);
+            mutex_enter_blocking(float_mutex);
+            data_pt->adc1_decoded = buffer_get_float32(data, 1e6, &idx);
             adc_v1 = buffer_get_float32(data, 1e6, &idx);
-            data_pt.adc2_decoded = buffer_get_float32(data, 1e6, &idx);
+            data_pt->adc2_decoded = buffer_get_float32(data, 1e6, &idx);
             adc_v2 = buffer_get_float32(data, 1e6, &idx);
-            mutex_exit(&float_mutex);
+            mutex_exit(float_mutex);
 
             break;
 

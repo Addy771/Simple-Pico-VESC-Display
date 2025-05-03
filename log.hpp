@@ -59,11 +59,10 @@ typedef struct
 } log_data_t;
 
 extern uint8_t sd_status;
-extern log_data_t data_pt;
 
 FRESULT init_filesystem();
 FRESULT create_log_file();
-FRESULT append_data_pt();
+FRESULT append_data_pt(log_data_t *data);
 void draw_SD_status(uint8_t x, uint8_t y);
 
 #endif
