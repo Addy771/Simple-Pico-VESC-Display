@@ -10,14 +10,17 @@
 #include "f_util.h"
 #include "hw_config.h"
 #include "hw_def.h"
+#include "page_ctrl.hpp"
 
 #include "bitmap/sd.h"
 #include "bitmap/noSD.h"
 #include "bitmap/sd_write.h"
+#include <cstdarg>
 
 
 extern pico_oled display;
 extern Debounce debouncer;
+extern page_controller page_ctrl;
 
 uint8_t sd_status = SD_NOT_PRESENT;
 
@@ -29,6 +32,21 @@ const char csv_head[] = "ms_today,input_voltage,temp_mos_max,temp_mos_1,temp_mos
                         "vesc_id,d_axis_voltage,q_axis_voltage,input_power,speed_kph,adc1_decoded,adc2_decoded,odometer\n";
 
 char log_filename[30] = "";
+
+
+void print_and_log(const char* format, ...)
+{
+    char log_buf[256];
+    va_list args;
+    va_start(args, format);
+
+    // Pass to printf for output to usb serial console
+    printf(format, args);
+
+    // Pass to display log system
+    sprintf(log_buf, format, args);
+    page_ctrl.log_write_string(log_buf);
+}
 
 
 FRESULT init_filesystem()

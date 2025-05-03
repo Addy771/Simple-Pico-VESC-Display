@@ -5,13 +5,14 @@
 #include "datatypes.h"
 #include "ff.h"
 
-//#define DBG_PRINT (fmt, args...)
-#define DBG_PRINT printf
-
 
 #define MIN_FREE_MB 100     // If the SD has less free space than this, the user should be warned
 #define LOG_PREFIX "log_"   // Numbered log filename prefix
 
+// #define DBG_PRINT printf
+#define DBG_PRINT print_and_log
+
+void print_and_log(const char* format, ...);
 
 typedef enum 
 {
@@ -64,5 +65,6 @@ FRESULT init_filesystem();
 FRESULT create_log_file();
 FRESULT append_data_pt(log_data_t *data);
 void draw_SD_status(uint8_t x, uint8_t y);
+void print_and_log(const char* format, ...);
 
 #endif

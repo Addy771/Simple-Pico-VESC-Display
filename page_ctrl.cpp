@@ -97,6 +97,40 @@ void page_controller::update(void)
     }
 
     // Switch pages
+
+    // Common calculations
+    mutex_enter_blocking(&float_mutex);
+
+    //     // Update rolling averages
+    //     b_cur_avg = (1 - ROLLING_AVG_RATIO) * b_cur_avg + ROLLING_AVG_RATIO * data_pt.current_in;
+    //     b_volts_avg = (1 - ROLLING_AVG_RATIO) * b_volts_avg + ROLLING_AVG_RATIO * data_pt.v_in;
+
+    //     // for now hardcode 13S battery Full =54.6V empty = 39V (3.0/cell) (delta V = 15.6)
+    //     b_soc = MIN(((b_volts_avg - 39.0) * 100 / 15.6), 100); // Get scale from min to max batt V
+    // Other calculations 
+    // Speed calculation
+    // core 1 should be doing speed calculations
+    // // KPH = ERPM / Pole Pairs * wheel diameter(mm)/1000000 * PI * 60 min/hour
+    // kph = float(m_erpm_avg/23 * 660/1000000 * 3.1415 * 60);
+
+    // // Odometer calculation
+    // // Distance = avg Speed * time
+    // static float average_speed = 0;
+    // static float time_hours = 0;
+    // static float distance_travelled = 0;
+    // // if time has been at least ODOMETER_UPDATE_INTERVAL_MS, calculate distance traveled and add to odometer
+    // time_between_odometer_check_ms = absolute_time_diff_us(last_odometer_count,current_time_ms)/1000;
+
+    // if (time_between_odometer_check_ms >= ODOMETER_UPDATE_INTERVAL_MS)
+    // {
+    //     average_speed = abs((kph + prev_kph_for_odometer))/2;
+    //     time_hours = time_between_odometer_check_ms/3600.0/1000.0;// convert kph * ms to km (odo)
+    //     distance_travelled = average_speed * time_hours;
+    //     odometer += distance_travelled;
+    //     prev_kph_for_odometer = kph;
+    //     last_odometer_count = current_time_ms;
+    // }  
+    mutex_exit(&float_mutex);     
 }
 
 
@@ -144,6 +178,8 @@ void page_controller::draw_page(void)
 // 
 void page_controller::page_main_draw(void)
 {
+ 
+
     u8g2_ClearBuffer(&u8g2);
 
     u8g2_SetFont(&u8g2, u8g2_font_fub42_tn);    
@@ -159,11 +195,15 @@ void page_controller::page_main_draw(void)
 }
 
 
-//
+// Log page, shows console text
 void page_controller::page_log_draw(void)
 {
     // Draw common frame
     // Populate button descriptions
 
+    // Set font for log text
+
+    mutex_enter_blocking(&log_mutex);
     u8g2_DrawLog(&u8g2, 0, 12, &u8log);    // Draw log text area
+    mutex_exit(&log_mutex);
 }
