@@ -14,7 +14,7 @@
 
 #define BUTTON_LOCK_TIME_MS 50  // After a button is pressed, it won't be checked again until this much time has passed. 
 
-#define U8LOG_WIDTH 48
+#define U8LOG_WIDTH 42
 #define U8LOG_HEIGHT 12
 
 typedef void (*page_draw_fn)();

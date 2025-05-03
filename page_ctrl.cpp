@@ -35,7 +35,7 @@ page_controller::page_controller(void)
     // Add page functions to list
     page_fn[0] = (page_draw_fn) &page_controller::page_main_draw;
     page_fn[1] = (page_draw_fn) &page_controller::page_log_draw;
-    page_idx = 0;
+    page_idx = 1;
 
     // Log system init
     u8log_Init(&u8log, U8LOG_WIDTH, U8LOG_HEIGHT, u8log_buf);
@@ -198,12 +198,16 @@ void page_controller::page_main_draw(void)
 // Log page, shows console text
 void page_controller::page_log_draw(void)
 {
+    u8g2_ClearBuffer(&u8g2);
     // Draw common frame
     // Populate button descriptions
 
     // Set font for log text
+    u8g2_SetFont(&u8g2, u8g2_font_t0_11_te);
 
     mutex_enter_blocking(&log_mutex);
     u8g2_DrawLog(&u8g2, 0, 12, &u8log);    // Draw log text area
     mutex_exit(&log_mutex);
+
+    u8g2_SendBuffer(&u8g2);
 }

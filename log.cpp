@@ -12,9 +12,6 @@
 #include "hw_def.h"
 #include "page_ctrl.hpp"
 
-#include "bitmap/sd.h"
-#include "bitmap/noSD.h"
-#include "bitmap/sd_write.h"
 #include <cstdarg>
 
 
@@ -41,10 +38,10 @@ void print_and_log(const char* format, ...)
     va_start(args, format);
 
     // Pass to printf for output to usb serial console
-    printf(format, args);
+    vprintf(format, args);
 
     // Pass to display log system
-    sprintf(log_buf, format, args);
+    vsnprintf(log_buf, sizeof(log_buf), format, args);
     page_ctrl.log_write_string(log_buf);
 }
 
@@ -340,24 +337,3 @@ FRESULT append_data_pt(log_data_t *data)
 }
 
 
-/// @brief Draw the SD icon according to the SD status
-/// @param x screen x coordinate to draw at
-/// @param y screen y coordinate to draw at
-void draw_SD_status(uint8_t x, uint8_t y)
-{
-    switch(sd_status)
-    {
-        case SD_NOT_PRESENT:
-        case SD_ERROR:
-            display.draw_bmp(no_sd_bitmap, no_sd_width, no_sd_height, x, y);
-            break;
-
-        case SD_PRESENT:
-            display.draw_bmp(sd_bitmap, sd_width, sd_height, x, y);
-            break;
-
-        case SD_WRITING:
-            display.draw_bmp(sd_wr_bitmap, sd_wr_width, sd_wr_height, x, y);
-            break;
-    }
-}
