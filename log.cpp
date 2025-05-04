@@ -1,9 +1,8 @@
 #include <cstdlib>
 #include <pico/stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include "log.hpp"
-#include "pico-oled/pico-oled.hpp"
-#include "Button-debouncer/button_debounce.h"
 
 #include "sd_card.h"
 #include "ff.h"
@@ -14,11 +13,7 @@
 
 #include <cstdarg>
 
-
-extern pico_oled display;
-extern Debounce debouncer;
 extern page_controller page_ctrl;
-
 uint8_t sd_status = SD_NOT_PRESENT;
 
 // When adding another value, update append_data_pt() and log.hpp as well
@@ -55,68 +50,68 @@ FRESULT init_filesystem()
     // Try to mount SD card
     FRESULT fr = f_mount(&pSD->fatfs, pSD->pcName, 1);
 
-    // display.print(FRESULT_str(fr));
 
     // Check if formatting is needed
     // FR_NO_FILESYSTEM
     if (fr == FR_NO_FILESYSTEM)
     {
-        display.draw_boxed_text("SD CARD NEEDS FORMATTING.\nPRESS LEFT TO CANCEL\nPRESS RIGHT TO FORMAT", 1, 1, 8, 20);
-        display.render();
-        display.fill(0);
-        sleep_ms(500);
+        return 1;   // temporarily abort, code needs to be adapted to new page system
+    //     display.draw_boxed_text("SD CARD NEEDS FORMATTING.\nPRESS LEFT TO CANCEL\nPRESS RIGHT TO FORMAT", 1, 1, 8, 20);
+    //     display.render();
+    //     display.fill(0);
+    //     sleep_ms(500);
 
 
-        while (1)
-        {
-            // Left button pressed?
-            if (debouncer.read(PB_LEFT_GPIO))
-            {
-                // Abort, return status
-                f_unmount(pSD->pcName);
-                return 1;
-            }
+    //     while (1)
+    //     {
+    //         // Left button pressed?
+    //         if (debouncer.read(PB_LEFT_GPIO))
+    //         {
+    //             // Abort, return status
+    //             f_unmount(pSD->pcName);
+    //             return 1;
+    //         }
 
-            // Right button pressed? 
-            if (debouncer.read(PB_RIGHT_GPIO))
-            {
-                // Format SD card
+    //         // Right button pressed? 
+    //         if (debouncer.read(PB_RIGHT_GPIO))
+    //         {
+    //             // Format SD card
 
-                BYTE work[FF_MAX_SS];   // Work area for formatting
+    //             BYTE work[FF_MAX_SS];   // Work area for formatting
 
-                // unmount first
-                f_unmount(pSD->pcName);
+    //             // unmount first
+    //             f_unmount(pSD->pcName);
 
-                // Create FAT volume with default parameters
-                fr = f_mkfs("", 0, work, sizeof(work));
+    //             // Create FAT volume with default parameters
+    //             fr = f_mkfs("", 0, work, sizeof(work));
 
-                if (fr != FR_OK)
-                {
-                    // Failed to format, do something
-                    f_unmount(pSD->pcName);
-                    return 2;
-                }
+    //             if (fr != FR_OK)
+    //             {
+    //                 // Failed to format, do something
+    //                 f_unmount(pSD->pcName);
+    //                 return 2;
+    //             }
 
-                // Set volume label (Can't use in this fatfs implementation)
-                //f_setlabel("SPVD SD");
+    //             // Set volume label (Can't use in this fatfs implementation)
+    //             //f_setlabel("SPVD SD");
 
 
-                // Mount once again so the filesystem can be used
-                fr = f_mount(&pSD->fatfs, pSD->pcName, 1);
+    //             // Mount once again so the filesystem can be used
+    //             fr = f_mount(&pSD->fatfs, pSD->pcName, 1);
 
-                if (fr != FR_OK)
-                {
-                    // Still can't use the SD card??
-                    f_unmount(pSD->pcName);
-                    return 3;
-                }
+    //             if (fr != FR_OK)
+    //             {
+    //                 // Still can't use the SD card??
+    //                 f_unmount(pSD->pcName);
+    //                 return 3;
+    //             }
 
-                break;  
-            }
-        }
+    //             break;  
+    //         }
+    //     }
 
     }
-    else if (fr == FR_NOT_READY)
+    if (fr == FR_NOT_READY)
     {
         // No SD card found
         f_unmount(pSD->pcName);
@@ -140,12 +135,12 @@ FRESULT init_filesystem()
     else
     {
         free_mb = (free_clust * pSD->fatfs.csize) / (2 * 1024); // sectors / 2 = KB, /1024 = MB
-        display.print_num("FREE SPACE: %dMB\n", free_mb);   
+        DBG_PRINT("FREE SPACE: %dMB\n", free_mb);   
 
         // Warn user if free space is low
         if (free_mb < MIN_FREE_MB)
         {
-            display.print("WARNING! SD CARD NEARLY FULL\n");
+            DBG_PRINT("WARNING! SD CARD NEARLY FULL\n");
         }
     }
 
@@ -206,7 +201,7 @@ FRESULT init_filesystem()
                     *end_char = 0;
                     uint16_t log_file_num = atoi(log_num_str);
                     
-                    DBG_PRINT("<LOG n=%d > ", log_file_num); 
+                    //DBG_PRINT("<LOG n=%d > ", log_file_num); 
 
                     // Record the log num if it's the highest we've seen
                     if (log_file_num > log_num)

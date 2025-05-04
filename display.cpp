@@ -15,8 +15,6 @@
 #include "hardware/spi.h"
 #include "hardware/rtc.h"
 
-#include "pico-oled/pico-oled.hpp"
-#include "pico-oled/gfx_font.h"
 #include "nv_flash.hpp"
 #include "log.hpp"
 
@@ -27,7 +25,6 @@
 
 #include "util_enum.h"
 #include <string.h>
-#include "Button-debouncer/button_debounce.h"
 #include "sd_card.h"
 #include "ff.h"
 #include "f_util.h"
@@ -38,11 +35,6 @@ extern "C"
 {
 #include "hw_def.h"
 }
-
-#include "pico-oled/font/press_start_2p.h"
-#include "pico-oled/font/too_simple.h"
-#include "pico-oled/font/Retron2000.h"
-#include "pico-oled/font/future_real.h"
 
 #include <u8g2.h>
 #include "u8x8_interface.hpp"
@@ -118,14 +110,6 @@ float prev_kph = 0;
 int64_t time_us = 0;
 uint8_t b_soc = 0;
 
-uint8_t pb_left_state, pb_left_prev_state;
-uint8_t pb_right_state, pb_right_prev_state;
-
-
-
-pico_oled display(OLED_SSD1309, /*i2c_address=*/ 0x3C, /*screen_width=*/ 128, /*screen_height=*/ 64, /*reset_gpio=*/ 15); 
-
-Debounce debouncer;
 
 absolute_time_t current_time_ms = get_absolute_time();
 absolute_time_t bootloader_timer_ms = current_time_ms;
@@ -148,21 +132,6 @@ int main()
 
     initialize_gpio();
     init_external_rtc();
-
-    // Instantiate debouncer and configure GPIO
-
-    debouncer.debounce_gpio(PB_LEFT_GPIO);
-    debouncer.debounce_gpio(PB_RIGHT_GPIO);
-    debouncer.debounce_gpio(PB_CENTER_GPIO);
-
-    debouncer.set_debounce_time(PB_LEFT_GPIO, 20.0);    // 20ms debounce time
-    debouncer.set_debounce_time(PB_RIGHT_GPIO, 20.0);
-    debouncer.set_debounce_time(PB_CENTER_GPIO, 20.0);    
-
-
-    // Set initial values of button states
-    pb_left_prev_state = pb_left_state = debouncer.read(PB_LEFT_GPIO);
-    pb_right_prev_state = pb_right_state = debouncer.read(PB_RIGHT_GPIO);
 
 
     // U8G2 init
@@ -566,19 +535,6 @@ int main()
     // }
 }
 
-void draw_battery_icon()
-{
-   
-
-    display.draw_vbar(b_soc, 0, 18, 15, OLED_HEIGHT - 1); // Battery icon outline
-    display.fill_rect(0, BATT_TERMINAL_TOP_LEFT_X, BATT_TERMINAL_TOP_LEFT_Y, BATT_TERMINAL_TOP_LEFT_X + BATT_TERMINAL_WIDTH, BATT_TERMINAL_TOP_LEFT_Y + BATT_TERMINAL_HEIGHT); // Draw block to represent battery terminal
-
-    // Batt Voltage and Current text
-    display.set_cursor(2, 0);
-    display.print_num("%.1fV", b_volts_avg);
-    display.set_cursor(2,display.get_font_height());
-    display.print_num("%.0fA", b_cur_avg);
-}
 
 void uart0_write(uint8_t * src, size_t len)
 {
@@ -693,20 +649,16 @@ void core1_entry()
 
         FRESULT result;
 
-        // If SS == 1 an SD card is connected
-        if (sd_status == SD_NOT_PRESENT)    // && gpio_get(SD_SS_GPIO) == 1)
+        // If SS == 0 an SD card is connected
+        if (sd_status == SD_NOT_PRESENT)    // && gpio_get(SD_SS_GPIO) == 0)
         {
-            DBG_PRINT("\033[2J\033[H" "FILESYSTEM INIT\n");
-            gpio_put(DEBUG_GPIO, 0);
+            DBG_PRINT(/*"\033[2J\033[H"*/ "FILESYSTEM INIT\n");
             result = init_filesystem();
-            gpio_put(DEBUG_GPIO, 1);
 
             DBG_PRINT("init_filesystem() returned with %d: %s\n", result, FRESULT_str(result));
             sleep_ms(1);
 
-            gpio_put(DEBUG_GPIO, 0);
-            result = create_log_file();
-            gpio_put(DEBUG_GPIO, 1);        
+            result = create_log_file();    
             
             DBG_PRINT("create_log_file() returned with %d: %s\n", result, FRESULT_str(result));
             sleep_ms(1);
@@ -714,9 +666,7 @@ void core1_entry()
         }
         else if(sd_status == SD_PRESENT && vesc_connected)
         {
-            gpio_put(DEBUG_GPIO, 0);
-            result = append_data_pt(data_pt);
-            gpio_put(DEBUG_GPIO, 1);          
+            result = append_data_pt(data_pt);       
 
             DBG_PRINT("append_data_pt() returned with %d: %s\n", result, FRESULT_str(result));            
         }

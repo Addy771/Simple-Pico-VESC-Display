@@ -41,7 +41,7 @@ set(CMAKE_SYSTEM_NAME Generic)
 
 
 
-include_directories("./bitmap")
+# include_directories("./bitmap")
 # include_directories("./bldc")
 # include_directories("./bldc/comm/")
 # include_directories("./bldc/util/")
@@ -52,7 +52,7 @@ add_subdirectory(FatFS-SD/FatFs_SPI build)
 
 add_executable(${TARGET_NAME}
 	display.cpp
-	pico-oled/pico-oled.cpp
+	# pico-oled/pico-oled.cpp
 	nv_flash.cpp
 	log.cpp
 	crc.c 
@@ -64,9 +64,8 @@ add_executable(${TARGET_NAME}
 	page_ctrl.cpp
 	)
 
-pico_generate_pio_header(${TARGET_NAME} ${CMAKE_CURRENT_LIST_DIR}/Button-debouncer/button_debounce.pio)
-
-target_sources(${TARGET_NAME} PRIVATE ./Button-debouncer/button_debounce.cpp)
+# pico_generate_pio_header(${TARGET_NAME} ${CMAKE_CURRENT_LIST_DIR}/Button-debouncer/button_debounce.pio)
+# target_sources(${TARGET_NAME} PRIVATE ./Button-debouncer/button_debounce.cpp)
 
 
 ### u8g2 related ###
