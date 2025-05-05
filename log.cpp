@@ -210,7 +210,7 @@ FRESULT init_filesystem()
                 }              
             }
 
-            DBG_PRINT("FILE: %s\n", f_info.fname);
+            //DBG_PRINT("FILE: %s\n", f_info.fname);
         }
 
     }

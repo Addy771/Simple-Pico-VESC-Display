@@ -129,7 +129,8 @@ int main()
 {
     stdio_init_all();
     time_init();  
-
+    cyw43_arch_init();  
+    
     initialize_gpio();
     init_external_rtc();
 
@@ -147,7 +148,8 @@ int main()
     u8g2_SetFont(&page_ctrl.u8g2, u8g2_font_10x20_tf);
     u8g2_SetDrawColor(&page_ctrl.u8g2, 1);  
 
-    cyw43_arch_init();    
+  
+    DBG_PRINT("Core 0 init complete.\n");
 
     // Set up some pointers that core1 needs to access
     data_pt = &page_ctrl.esc_data; 
@@ -567,11 +569,7 @@ void process_data(uint8_t *data, size_t len);
 // Second core thread. Handles UART communication
 void core1_entry()
 {
-    //const uint BUILTIN_LED_PIN = PICO_DEFAULT_LED_PIN;
-    // uint8_t LED_STATUS = 1;
-
-
-
+    DBG_PRINT("Core 1 launched.\n");
 
     // Initialize UART0 
     real_baudrate = uart_init(uart0, UART_BAUDRATE);
@@ -649,18 +647,18 @@ void core1_entry()
 
         FRESULT result;
 
-        // If SS == 0 an SD card is connected
-        if (sd_status == SD_NOT_PRESENT)    // && gpio_get(SD_SS_GPIO) == 0)
+        // If SD_DETECT_GPIO == 0 an SD card is connected
+        if (sd_status == SD_NOT_PRESENT && gpio_get(SD_DETECT_GPIO) == 0)
         {
             DBG_PRINT(/*"\033[2J\033[H"*/ "FILESYSTEM INIT\n");
             result = init_filesystem();
 
-            DBG_PRINT("init_filesystem() returned with %d: %s\n", result, FRESULT_str(result));
+            DBG_PRINT("init_filesystem(): %s\n", FRESULT_str(result));
             sleep_ms(1);
 
             result = create_log_file();    
             
-            DBG_PRINT("create_log_file() returned with %d: %s\n", result, FRESULT_str(result));
+            DBG_PRINT("create_log_file(): %s\n", FRESULT_str(result));
             sleep_ms(1);
 
         }
@@ -668,7 +666,7 @@ void core1_entry()
         {
             result = append_data_pt(data_pt);       
 
-            DBG_PRINT("append_data_pt() returned with %d: %s\n", result, FRESULT_str(result));            
+            DBG_PRINT("append_data_pt(): %s\n", FRESULT_str(result));            
         }
 
 
