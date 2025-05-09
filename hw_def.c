@@ -61,6 +61,7 @@ void initialize_gpio(void)
     // UART GPIO
     gpio_set_function(UART_TX_GPIO, GPIO_FUNC_UART);
     gpio_set_function(UART_RX_GPIO, GPIO_FUNC_UART);
+    gpio_pull_up(UART_RX_GPIO);
 
     //I2C GPIO
     i2c_init(RTC_I2C_UNIT, RTC_I2C_CLK);  

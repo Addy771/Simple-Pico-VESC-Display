@@ -35,7 +35,7 @@ page_controller::page_controller(void)
     // Add page functions to list
     page_fn[0] = (page_draw_fn) &page_controller::page_main_draw;
     page_fn[1] = (page_draw_fn) &page_controller::page_log_draw;
-    page_idx = 1;
+    page_idx = 0;
 
     // Log system init
     u8log_Init(&u8log, U8LOG_WIDTH, U8LOG_HEIGHT, u8log_buf);
@@ -178,18 +178,17 @@ void page_controller::draw_page(void)
 // 
 void page_controller::page_main_draw(void)
 {
- 
+    char print_buf[50];
 
     u8g2_ClearBuffer(&u8g2);
 
-    u8g2_SetFont(&u8g2, u8g2_font_fub42_tn);    
-    u8g2_DrawStr(&u8g2, 10, 50, "120");
-
     u8g2_SetFont(&u8g2, u8g2_font_logisoso38_tn);
-    u8g2_DrawStr(&u8g2, 130, 50, "120");
+    u8g2_DrawStr(&u8g2, 80, 80, "120");
     
-    u8g2_SetFont(&u8g2, u8g2_font_fub35_tn);
-    u8g2_DrawStr(&u8g2, 10, 110, "120");
+    u8g2_SetFont(&u8g2, u8g2_font_t0_11_te);
+    sprintf(print_buf, "VIN: %2.1f", esc_data.v_in);
+    u8g2_DrawStr(&u8g2, 0, 12, print_buf);
+
 
     u8g2_SendBuffer(&u8g2);
 }

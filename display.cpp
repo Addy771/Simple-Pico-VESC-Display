@@ -130,7 +130,7 @@ int main()
     stdio_init_all();
     time_init();  
     cyw43_arch_init();  
-    
+
     initialize_gpio();
     init_external_rtc();
 
@@ -541,26 +541,31 @@ int main()
 void uart0_write(uint8_t * src, size_t len)
 {
     uart_write_blocking(uart0, src, len);
+    //DBG_PRINT("UART0 write, size: %d\n", len);
 }
 
 
 uint8_t receive_packet(PACKET_STATE_t *rx_packet)
 {
-    // Wait up to 10ms for the initial response
+    uint bytes_read = 0;
+
+    // Wait up to 20ms for the initial response
     if (uart_is_readable_within_us(uart0, 10000))
     {
         // Read each byte of the response until there is no more data sent for 30 bits worth of time
         while(uart_is_readable_within_us(uart0, (1e6*30)/UART_BAUDRATE))
         {
             packet_process_byte(uart_getc(uart0), rx_packet);
+            bytes_read++;
         }
+    }
 
+    //DBG_PRINT("receive_packet: %d bytes read\n", bytes_read);
+
+    if (bytes_read > 0)
         return 1;
-    }
     else
-    {
         return 0;
-    }
 }
 
 void process_data(uint8_t *data, size_t len);
@@ -668,6 +673,8 @@ void core1_entry()
 
             DBG_PRINT("append_data_pt(): %s\n", FRESULT_str(result));            
         }
+
+        //DBG_PRINT("sd_status: %d, vesc_connected:%d\r", sd_status, vesc_connected);
 
 
         mutex_exit(flash_mutex);    // Release lock
