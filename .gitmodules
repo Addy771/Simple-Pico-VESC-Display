@@ -4,3 +4,6 @@
 [submodule "FatFS-SD"]
 	path = FatFS-SD
 	url = https://github.com/carlk3/no-OS-FatFS-SD-SPI-RPi-Pico.git
+[submodule "can2040"]
+	path = can2040
+	url = https://github.com/KevinOConnor/can2040
