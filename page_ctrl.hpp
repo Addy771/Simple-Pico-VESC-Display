@@ -55,6 +55,7 @@ class page_controller
         nv_flash_storage nv_settings;
         log_data_t esc_data;
 
+
         page_controller(void);
         void update(void);
         void draw_page(void);

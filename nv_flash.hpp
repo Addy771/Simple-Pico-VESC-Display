@@ -20,7 +20,14 @@ typedef struct
     uint32_t log_num = 0;
     float odometer = 0.0;
     uint8_t load_modes = 0;
+    uint8_t flags = 0;
 } nv_flash_struct;
+
+
+typedef enum
+{
+    comm_use_can = (1 << 0)
+} nv_flags;
 
 
 class nv_flash_storage

@@ -40,7 +40,6 @@ add_compile_options(-Wall
 set(CMAKE_SYSTEM_NAME Generic)		
 
 
-
 # include_directories("./bitmap")
 # include_directories("./bldc")
 # include_directories("./bldc/comm/")
@@ -52,7 +51,6 @@ add_subdirectory(FatFS-SD/FatFs_SPI build)
 
 add_executable(${TARGET_NAME}
 	display.cpp
-	# pico-oled/pico-oled.cpp
 	nv_flash.cpp
 	log.cpp
 	crc.c 
@@ -85,9 +83,7 @@ target_include_directories(${TARGET_NAME} PRIVATE
 	u8g2/csrc
 )
 
-
-
-# include_directories("./u8g2")
+add_library(can2040 can2040/src/can2040.c)
 
 
 set_source_files_properties(crc.c PROPERTIES LANGUAGE CXX)
@@ -102,6 +98,9 @@ target_link_options(${TARGET_NAME} PRIVATE -Xlinker --print-memory-usage)
 target_compile_definitions(${TARGET_NAME} PRIVATE
     CYW43_SPI_PIO_PREFERRED_PIO=0
 )
+
+# Needed for can2040 to find cmsis headers
+target_link_libraries(can2040 cmsis_core)
 
 # pull in common dependencies
 target_link_libraries(${TARGET_NAME} 
@@ -118,8 +117,11 @@ target_link_libraries(${TARGET_NAME}
 	hardware_flash
 	hardware_spi
 	hardware_rtc
+	hardware_irq
 	FatFs_SPI
 	u8g2
+	can2040
+	cmsis_core
 	)
 
 

@@ -35,6 +35,9 @@ UART0 RX | I2C0 SCL | SPI1 CSn | GP13 | 17│●              ●│24 | GP18   
 
 #include "hardware/i2c.h"
 #include "hardware/rtc.h"
+#include "hardware/pio.h"
+#include "hardware/irq.h"
+#include "can2040/src/can2040.h"
 
 #ifndef HW_DEF_H
 #define HW_DEF_H
@@ -43,7 +46,7 @@ UART0 RX | I2C0 SCL | SPI1 CSn | GP13 | 17│●              ●│24 | GP18   
 /* Configuration */
 
 #define UART_BAUDRATE 115200
-#define CAN_BAUDRATE
+#define CAN_BAUDRATE 500000
 #define RTC_I2C_CLK 100 * 1000
 #define RTC_I2C_ADDR 0x68
 #define RTC_I2C_UNIT i2c0
@@ -53,6 +56,8 @@ UART0 RX | I2C0 SCL | SPI1 CSn | GP13 | 17│●              ●│24 | GP18   
 #define BOOTLOADER_BUTTON_TIME_MS 2000  // Length of time in ms that L/R buttons must be held to enter bootloader mode
 #define BUTTON_LONG_PRESS_MS 500        // Length of time in ms a button must be held to be considered a long press
 #define ROLLING_AVG_RATIO 0.3           // Weight between 0-1 of new data in rolling average. Lower values slow the response to changes
+
+#define CAN_PIO_UNIT_NUM 1              // can2040 pio unit. Must not be shared since it fully consumes 1 pio unit
 
 
 /* Pinout */
@@ -154,5 +159,14 @@ void set_rtc_time(datetime_t current_time);
 void get_rtc_time(datetime_t *rtc_time);
 void set_rtc_sram(uint8_t sram_address, uint8_t *data, uint8_t len);
 void get_rtc_sram(uint8_t sram_address, uint8_t *data, uint8_t len);
+
+
+#if CAN_PIO_UNIT_NUM == 0
+    #define CAN_PIO_IRQn PIO0_IRQ_0
+#elif CAN_PIO_UNIT_NUM == 1
+    #define CAN_PIO_IRQn PIO1_IRQ_0
+#elif CAN_PIO_UNIT_NUM == 2
+    #define CAN_PIO_IRQn PIO2_IRQ_0
+#endif
 
 #endif

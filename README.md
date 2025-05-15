@@ -1,5 +1,5 @@
 # Simple Pico VESC Display
-A dashboard display for Personal Electric Vehicles based on the Raspberry Pi Pico (RP2040) microcontroller and SSD1306 compatible displays.
+A dashboard display for Personal Electric Vehicles based on the Raspberry Pi Pico (RP2040) microcontroller and u8g2 compatible displays.
 
 
 # Feature goals
@@ -11,10 +11,13 @@ A dashboard display for Personal Electric Vehicles based on the Raspberry Pi Pic
 # License
 This project is licensed under the [CC BY-NC 4.0 license](https://creativecommons.org/licenses/by-nc/4.0/), except for source files covered by existing licenses: 
 
-[VESC](https://github.com/vedderb/bldc) firmware ([GNU GPL V3+](http://www.gnu.org/licenses/)).
+[VESC](https://github.com/vedderb/bldc) firmware ([GNU GPL V3+](http://www.gnu.org/licenses/))
 
-[Button-debouncer](https://github.com/GitJer/Some_RPI-Pico_stuff) ([MIT License](https://github.com/GitJer/Some_RPI-Pico_stuff/blob/main/LICENSE))
+[U8G2](https://github.com/olikraus/u8g2) ([new-bsd](http://www.opensource.org/licenses/bsd-license.php))
 
+[FatFS-SD](https://github.com/carlk3/no-OS-FatFS-SD-SPI-RPi-Pico) ([Apache-2.0](https://github.com/carlk3/no-OS-FatFS-SD-SPI-RPi-Pico#Apache-2.0-1-ov-file))
+
+[can2040](https://github.com/KevinOConnor/can2040) ([GNU GPL V3](http://www.gnu.org/licenses/))
 
 # Building the project
 I use https://hub.docker.com/r/xingrz/rpi-pico-builder to build the project. This simplifies the process of setting up the toolchain and build environment.

@@ -14,6 +14,7 @@
 #include "hardware/uart.h"
 #include "hardware/spi.h"
 #include "hardware/rtc.h"
+#include "hardware/irq.h"
 
 #include "nv_flash.hpp"
 #include "log.hpp"
@@ -30,10 +31,12 @@
 #include "f_util.h"
 #include "hw_config.h"
 #include "rtc.h"
+#include "circular_buf.hpp"
 
 extern "C" 
 {
 #include "hw_def.h"
+#include "can2040/src/can2040.h"
 }
 
 #include <u8g2.h>
@@ -67,30 +70,23 @@ extern "C"
 // Comment out debug when not using
 #define DEBUG
 
-// oled defines
-#define OLED_HEIGHT 64
-#define OLED_WIDTH 128
-#define OLED_FRAMERATE 60
 
 //#define BOOTLOADER_BUTTON_TIME 0.5     // time in seconds for buttons to be pressed before entering bootloader mode
 #define DISPLAY_RESET_BUTTON_TIME 2
 #define ODOMETER_UPDATE_INTERVAL_MS 100 // time between odometer updates
-
-#define BATT_TERMINAL_TOP_LEFT_X 4  // TODO: figure out a better way to do this
-#define BATT_TERMINAL_TOP_LEFT_Y 15
-#define BATT_TERMINAL_WIDTH 8
-#define BATT_TERMINAL_HEIGHT 3
 
 
 // function prototypes
 void draw_battery_icon();
 
 void core1_entry();
+static void can2040_cb(struct can2040 *cd, uint32_t notify, struct can2040_msg *msg);
 
 
 
 
-
+static struct can2040 cbus;
+volatile circular_buf<can2040_msg, 10> can_msg_buf;
 
 uint32_t real_baudrate = 0;
 uint8_t response_code = 0;
@@ -571,13 +567,28 @@ uint8_t receive_packet(PACKET_STATE_t *rx_packet)
 void process_data(uint8_t *data, size_t len);
 
 
-// Second core thread. Handles UART communication
+static void PIOx_IRQHandler(void)
+{
+    can2040_pio_irq_handler(&cbus);
+}
+
+
+// Second core thread. Handles UART/CAN communication and SD card logging
 void core1_entry()
 {
     DBG_PRINT("Core 1 launched.\n");
 
     // Initialize UART0 
     real_baudrate = uart_init(uart0, UART_BAUDRATE);
+
+    // Initialize can2040
+    can2040_setup(&cbus, CAN_PIO_UNIT_NUM);
+    can2040_callback_config(&cbus, can2040_cb);
+
+    irq_set_exclusive_handler(CAN_PIO_IRQn, PIOx_IRQHandler);
+    irq_set_priority(CAN_PIO_IRQn, 1);
+    irq_set_enabled(CAN_PIO_IRQn, true);
+    can2040_start(&cbus, frequency_count_khz(CLOCKS_FC0_SRC_VALUE_CLK_SYS)*1000, CAN_BAUDRATE, CAN_RX_GPIO, CAN_TX_GPIO);
 
     PACKET_STATE_t vesc_comm;
     uint8_t send_payload[50];
@@ -595,6 +606,19 @@ void core1_entry()
         fet temp limit start/end
         motor temp limit start/end
     */
+
+    // CAN test
+    can2040_msg cur_msg;
+ 
+    while (true)
+    {
+        if (!can_msg_buf.is_empty())
+        {
+            cur_msg = can_msg_buf.pop();
+            DBG_PRINT("Rx CAN msg: ID 0x%08X, %d data bytes\n", cur_msg.id, cur_msg.dlc);
+        }
+        
+    }
 
     next_sample = get_absolute_time();
     while (true)
@@ -737,7 +761,6 @@ void process_data(uint8_t *data, size_t len)
             // TODO: change hardcode wheel diameter and get from vesc
             // KPH = ERPM / Pole Pairs * wheel diameter(mm)/1000000 * PI * 60 min/hour
 
-            data_pt->speed_kph = float(data_pt->rpm/23.0 * 660/1000000 * 3.1415 * 60);
             
             // do debug data here instead of getting from vesc
             data_pt->speed_kph = float(data_pt->rpm/23.0 * 660/1000000 * 3.1415 * 60);
@@ -769,5 +792,22 @@ void process_data(uint8_t *data, size_t len)
 }
 
 
+// Callback to handle CAN messages
+static void __not_in_flash_func(can2040_cb)(struct can2040 *cd, uint32_t notify, struct can2040_msg *msg)
+{
+    switch(notify)
+    {
+        case CAN2040_NOTIFY_RX:
+            // DBG_PRINT("Rx'd\n");
+            can_msg_buf.push(*msg);
+            break;
 
+        case CAN2040_NOTIFY_TX:
+            // DBG_PRINT("Tx'd\n");
+            break;
 
+        case CAN2040_NOTIFY_ERROR:
+            DBG_PRINT("ERR\n");
+            break;
+    }
+}
