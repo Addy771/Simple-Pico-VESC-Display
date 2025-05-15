@@ -609,13 +609,84 @@ void core1_entry()
 
     // CAN test
     can2040_msg cur_msg;
+    uint8_t VESC_ID;
+    uint8_t CMD_ID;
+    uint8_t status_flags = 0;
+    uint32_t idx;
+    absolute_time_t last_complete_status = get_absolute_time();
  
     while (true)
     {
         if (!can_msg_buf.is_empty())
         {
             cur_msg = can_msg_buf.pop();
-            DBG_PRINT("Rx CAN msg: ID 0x%08X, %d data bytes\n", cur_msg.id, cur_msg.dlc);
+
+            // MS bytes should be 0x8000 for VESC messages
+            if ((cur_msg.id & 0xFFFF0000) == 0x80000000)
+            {
+                VESC_ID = cur_msg.id & 0xFF;        // low byte of ID is VESC unit ID
+                CMD_ID = (cur_msg.id & 0xFF00) >> 8;  // second byte of ID is command type
+                idx = 0;
+
+                DBG_PRINT("CAN_ID=%08X VESC ID=0x%02X CMD=%d\n", cur_msg.id, VESC_ID, CMD_ID);
+
+                mutex_enter_blocking(float_mutex);
+                switch (CMD_ID)
+                {
+                    case CAN_PACKET_STATUS:
+                        status_flags |= 1 << 1;
+                        data_pt->rpm = buffer_get_int32(cur_msg.data, &idx);
+                        data_pt->current_motor = buffer_get_int16(cur_msg.data, &idx) * 10;
+                        data_pt->duty_now = buffer_get_int16(cur_msg.data, &idx) * 1000;
+                        break;
+
+                    case CAN_PACKET_STATUS_2:
+                        status_flags |= 1 << 2;
+                        data_pt->amp_hours = buffer_get_int32(cur_msg.data, &idx) * 10000;
+                        data_pt->amp_hours_charged = buffer_get_int32(cur_msg.data, &idx) * 10000;
+                        break;                 
+
+                    case CAN_PACKET_STATUS_3:
+                        status_flags |= 1 << 3;
+                        data_pt->watt_hours = buffer_get_int32(cur_msg.data, &idx) * 10000;
+                        data_pt->watt_hours_charged = buffer_get_int32(cur_msg.data, &idx) * 10000;
+                        break;       
+                        
+                    case CAN_PACKET_STATUS_4:
+                        status_flags |= 1 << 4;
+                        data_pt->temp_mos = buffer_get_int16(cur_msg.data, &idx) * 10;
+                        data_pt->temp_motor = buffer_get_int16(cur_msg.data, &idx) * 10;
+                        data_pt->current_in = buffer_get_int16(cur_msg.data, &idx) * 10;
+                        data_pt->position = buffer_get_int16(cur_msg.data, &idx) * 50;     
+                        break;        
+                        
+                    case CAN_PACKET_STATUS_5:
+                        status_flags |= 1 << 5;
+                        data_pt->tachometer = buffer_get_int32(cur_msg.data, &idx) * 6;
+                        data_pt->v_in = buffer_get_int16(cur_msg.data, &idx) * 10;
+                        break;    
+
+                    case CAN_PACKET_STATUS_6:
+                        status_flags |= 1 << 6;
+                        // need space in struct for ADC readings
+
+                        break;                                                    
+                }
+                mutex_exit(float_mutex);
+
+                // If B1-B6 are set, a full set of status messages was received
+                if (status_flags == 0b1111110)
+                {
+                    DBG_PRINT("Full status received, %dms since last\n", get_absolute_time() - last_complete_status);
+                    last_complete_status = get_absolute_time();
+                    status_flags = 0;
+                }
+            }
+            else
+            {
+                // non VESC message
+                DBG_PRINT("Rx CAN msg: ID 0x%08X, %d data bytes\n", cur_msg.id, cur_msg.dlc);
+            }
         }
         
     }
