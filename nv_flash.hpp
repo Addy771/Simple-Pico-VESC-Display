@@ -21,12 +21,14 @@ typedef struct
     float odometer = 0.0;
     uint8_t load_modes = 0;
     uint8_t flags = 0;
+    uint8_t user_vesc_can_id = 0;
+    uint8_t user_disp_can_id = 0;
 } nv_flash_struct;
 
 
 typedef enum
 {
-    comm_use_can = (1 << 0)
+    COMM_USE_CAN = (1 << 0)
 } nv_flags;
 
 

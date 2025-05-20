@@ -109,6 +109,7 @@ target_link_libraries(${TARGET_NAME}
 	pico_sync
 	pico_malloc
 	pico_cyw43_arch_none
+	pico_rand
 	hardware_i2c 
 	hardware_adc 
 	hardware_pwm 

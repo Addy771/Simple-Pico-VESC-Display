@@ -50,14 +50,13 @@ UART0 RX | I2C0 SCL | SPI1 CSn | GP13 | 17│●              ●│24 | GP18   
 #define RTC_I2C_CLK 100 * 1000
 #define RTC_I2C_ADDR 0x68
 #define RTC_I2C_UNIT i2c0
-#define LOG_SAMPLE_RATE 10              // How often to sample data from VESC (in Hz)
+#define LOG_SAMPLE_RATE 1              // How often to sample data from VESC (in Hz)
 #define DISPLAY_BACKLIGHT_PWM_KHZ 10    // Backlight PWM dimming frequency
 #define SD_SPI_CLK_HZ 25 * 1000 * 1000
 #define BOOTLOADER_BUTTON_TIME_MS 2000  // Length of time in ms that L/R buttons must be held to enter bootloader mode
 #define BUTTON_LONG_PRESS_MS 500        // Length of time in ms a button must be held to be considered a long press
+#define COMM_MSG_TIMEOUT_MS 10          // Length of time in ms. If the ESC doesn't reply in this period, it's considered disconnected
 #define ROLLING_AVG_RATIO 0.3           // Weight between 0-1 of new data in rolling average. Lower values slow the response to changes
-
-#define CAN_PIO_UNIT_NUM 1              // can2040 pio unit. Must not be shared since it fully consumes 1 pio unit
 
 
 /* Pinout */
@@ -149,6 +148,8 @@ typedef enum
     LOAD_MODE_BRAKE_LIGHT           // Output turns on when regen braking, for driving brake lights
 } ext_load_mode;
 
+#define VESC_CAN_ID_MAX 4   // Maximum number of IDs to store of VESCs observed on the CAN bus
+#define CAN_PIO_UNIT_NUM 1              // can2040 pio unit. Must not be shared since it fully consumes 1 pio unit
 
 /* Prototypes */
 

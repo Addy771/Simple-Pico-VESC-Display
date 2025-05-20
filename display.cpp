@@ -4,6 +4,7 @@
 #include "pico/multicore.h"
 #include "pico/sync.h"
 #include "pico/cyw43_arch.h"
+#include "pico/rand.h"
 
 #include "hardware/i2c.h"
 #include "hardware/clocks.h"
@@ -77,16 +78,17 @@ extern "C"
 
 
 // function prototypes
-void draw_battery_icon();
-
 void core1_entry();
 static void can2040_cb(struct can2040 *cd, uint32_t notify, struct can2040_msg *msg);
-
-
-
+void process_data(uint8_t *data, size_t len);
 
 static struct can2040 cbus;
-volatile circular_buf<can2040_msg, 10> can_msg_buf;
+volatile circular_buf<can2040_msg, 20> can_msg_buf;
+uint8_t vesc_can_ids[VESC_CAN_ID_MAX];
+uint8_t vesc_id_count = 0;
+uint8_t display_can_id = 0;
+uint8_t full_packet_received = 0;
+uint last_response_offset;
 
 uint32_t real_baudrate = 0;
 uint8_t response_code = 0;
@@ -130,6 +132,7 @@ int main()
     initialize_gpio();
     init_external_rtc();
 
+    get_rand_32();  // First call of this takes ~1ms to generate the seed
 
     // U8G2 init
     set_backlight(120);
@@ -541,7 +544,7 @@ void uart0_write(uint8_t * src, size_t len)
 }
 
 
-uint8_t receive_packet(PACKET_STATE_t *rx_packet)
+uint8_t receive_packet_uart(PACKET_STATE_t *rx_packet)
 {
     uint bytes_read = 0;
 
@@ -556,7 +559,7 @@ uint8_t receive_packet(PACKET_STATE_t *rx_packet)
         }
     }
 
-    //DBG_PRINT("receive_packet: %d bytes read\n", bytes_read);
+    //DBG_PRINT("receive_packet_uart: %d bytes read\n", bytes_read);
 
     if (bytes_read > 0)
         return 1;
@@ -564,7 +567,54 @@ uint8_t receive_packet(PACKET_STATE_t *rx_packet)
         return 0;
 }
 
-void process_data(uint8_t *data, size_t len);
+
+void receive_packet_can(can2040_msg *rx_msg, uint8_t can_command_id)
+{
+    static uint8_t rx_buffer[PACKET_MAX_PL_LEN];
+    uint16_t buffer_len;
+    uint8_t vesc_id, first_empty_id;
+
+    switch (can_command_id)
+    {
+        case CAN_PACKET_FILL_RX_BUFFER:
+            //DBG_PRINT("Filling RX buffer at offset 0x%02X\n", rx_msg->data[0]);
+            // Copy the 7 data bytes into the rx buffer
+            for (uint buf_offset = 0; buf_offset < 7; buf_offset++)
+            {
+                rx_buffer[rx_msg->data[0] + buf_offset] = rx_msg->data[1+buf_offset];
+            }
+            break;
+
+        case CAN_PACKET_PROCESS_RX_BUFFER:
+            buffer_len = (rx_msg->data[2] << 8) | rx_msg->data[3];
+            //DBG_PRINT("Processing RX buf of length %d\n", buffer_len);
+            process_data(rx_buffer, buffer_len);
+            break;
+
+        case CAN_PACKET_NOTIFY_BOOT:
+            // Add this VESC's ID if it's not known already
+            vesc_id = rx_msg->id & 0xFF;
+            first_empty_id = 0xFF;
+            for (uint8_t idn = 0; idn < VESC_CAN_ID_MAX; idn++)
+            {
+                if (vesc_can_ids[idn] == 0 && first_empty_id == 0xFF)
+                {
+                    first_empty_id = idn;
+                }
+                // If the ID is in the list already, abort
+                if (vesc_can_ids[idn] == vesc_id)
+                    return;
+            }
+            if (first_empty_id != 0xFF)
+                vesc_can_ids[first_empty_id] = vesc_id;
+            break;
+
+        default:
+            DBG_PRINT("Unhandled packet type.\n");
+            break;
+    }
+
+}
 
 
 static void PIOx_IRQHandler(void)
@@ -578,6 +628,8 @@ void core1_entry()
 {
     DBG_PRINT("Core 1 launched.\n");
 
+    memset(vesc_can_ids, 0, VESC_CAN_ID_MAX); // Clear array of VESC CAN IDs
+
     // Initialize UART0 
     real_baudrate = uart_init(uart0, UART_BAUDRATE);
 
@@ -589,6 +641,18 @@ void core1_entry()
     irq_set_priority(CAN_PIO_IRQn, 1);
     irq_set_enabled(CAN_PIO_IRQn, true);
     can2040_start(&cbus, frequency_count_khz(CLOCKS_FC0_SRC_VALUE_CLK_SYS)*1000, CAN_BAUDRATE, CAN_RX_GPIO, CAN_TX_GPIO);
+
+    // Apply user CAN IDs if they've been set
+    if (page_ctrl.nv_settings.data.user_vesc_can_id)
+    {
+        vesc_can_ids[0] = page_ctrl.nv_settings.data.user_vesc_can_id;
+        vesc_id_count++;
+    }
+
+    if (page_ctrl.nv_settings.data.user_disp_can_id)
+    {
+        display_can_id = page_ctrl.nv_settings.data.user_disp_can_id;
+    }    
 
     PACKET_STATE_t vesc_comm;
     uint8_t send_payload[50];
@@ -609,87 +673,113 @@ void core1_entry()
 
     // CAN test
     can2040_msg cur_msg;
-    uint8_t VESC_ID;
-    uint8_t CMD_ID;
-    uint8_t status_flags = 0;
+    uint8_t vesc_id;
+    uint8_t cmd_id;
+    uint8_t temp_id;
     uint32_t idx;
-    absolute_time_t last_complete_status = get_absolute_time();
- 
+    uint8_t filtered_cmd = 0;
+    page_ctrl.nv_settings.data.flags |= COMM_USE_CAN;    ///// debug override
+    absolute_time_t msg_send_time;
+
+    next_sample = get_absolute_time();    
     while (true)
     {
-        if (!can_msg_buf.is_empty())
+        // Handle CAN messages if CAN mode is enabled
+        if (page_ctrl.nv_settings.data.flags & COMM_USE_CAN)
         {
-            cur_msg = can_msg_buf.pop();
-
-            // MS bytes should be 0x8000 for VESC messages
-            if ((cur_msg.id & 0xFFFF0000) == 0x80000000)
+            if (!can_msg_buf.is_empty())
             {
-                VESC_ID = cur_msg.id & 0xFF;        // low byte of ID is VESC unit ID
-                CMD_ID = (cur_msg.id & 0xFF00) >> 8;  // second byte of ID is command type
-                idx = 0;
+                cur_msg = can_msg_buf.pop();
 
-                DBG_PRINT("CAN_ID=%08X VESC ID=0x%02X CMD=%d\n", cur_msg.id, VESC_ID, CMD_ID);
-
-                mutex_enter_blocking(float_mutex);
-                switch (CMD_ID)
+                // MS bytes should be 0x8000 for VESC messages
+                if ((cur_msg.id & 0xFFFF0000) == 0x80000000)
                 {
-                    case CAN_PACKET_STATUS:
-                        status_flags |= 1 << 1;
-                        data_pt->rpm = buffer_get_int32(cur_msg.data, &idx);
-                        data_pt->current_motor = buffer_get_int16(cur_msg.data, &idx) * 10;
-                        data_pt->duty_now = buffer_get_int16(cur_msg.data, &idx) * 1000;
-                        break;
+                    vesc_id = cur_msg.id & 0xFF;        // low byte of ID is VESC unit ID
+                    cmd_id = (cur_msg.id & 0xFF00) >> 8;  // second byte of ID is command type
+                    idx = 0;
 
-                    case CAN_PACKET_STATUS_2:
-                        status_flags |= 1 << 2;
-                        data_pt->amp_hours = buffer_get_int32(cur_msg.data, &idx) * 10000;
-                        data_pt->amp_hours_charged = buffer_get_int32(cur_msg.data, &idx) * 10000;
-                        break;                 
+                    //DBG_PRINT("CAN_ID=%08X VESC ID=0x%02X CMD=%d DAT=%dB\n", cur_msg.id, vesc_id, cmd_id, cur_msg.dlc);
 
-                    case CAN_PACKET_STATUS_3:
-                        status_flags |= 1 << 3;
-                        data_pt->watt_hours = buffer_get_int32(cur_msg.data, &idx) * 10000;
-                        data_pt->watt_hours_charged = buffer_get_int32(cur_msg.data, &idx) * 10000;
-                        break;       
-                        
-                    case CAN_PACKET_STATUS_4:
-                        status_flags |= 1 << 4;
-                        data_pt->temp_mos = buffer_get_int16(cur_msg.data, &idx) * 10;
-                        data_pt->temp_motor = buffer_get_int16(cur_msg.data, &idx) * 10;
-                        data_pt->current_in = buffer_get_int16(cur_msg.data, &idx) * 10;
-                        data_pt->position = buffer_get_int16(cur_msg.data, &idx) * 50;     
-                        break;        
-                        
-                    case CAN_PACKET_STATUS_5:
-                        status_flags |= 1 << 5;
-                        data_pt->tachometer = buffer_get_int32(cur_msg.data, &idx) * 6;
-                        data_pt->v_in = buffer_get_int16(cur_msg.data, &idx) * 10;
-                        break;    
 
-                    case CAN_PACKET_STATUS_6:
-                        status_flags |= 1 << 6;
-                        // need space in struct for ADC readings
+                    // If VESC ID is not known, use the ID from the first VESC message we see
+                    if (vesc_id_count == 0)
+                    {
+                        vesc_can_ids[0] = vesc_id;
+                        vesc_id_count++;
+                    }
 
-                        break;                                                    
+                    //DBG_PRINT("VESC=0x%02X CMD=%d DATA(%d)=%08X%08X\n", vesc_id, cmd_id, cur_msg.dlc, cur_msg.data32[1], cur_msg.data32[0]);
+
+                    //uint32_t interrupt_status = save_and_disable_interrupts();
+                    receive_packet_can(&cur_msg, cmd_id);
+                    //restore_interrupts(interrupt_status);
                 }
-                mutex_exit(float_mutex);
-
-                // If B1-B6 are set, a full set of status messages was received
-                if (status_flags == 0b1111110)
+                else
                 {
-                    DBG_PRINT("Full status received, %dms since last\n", get_absolute_time() - last_complete_status);
-                    last_complete_status = get_absolute_time();
-                    status_flags = 0;
+                    // non VESC message
+                    DBG_PRINT("Rx CAN msg: ID 0x%08X, %d data bytes\n", cur_msg.id, cur_msg.dlc);
                 }
             }
-            else
+
+            // Need some method to send next packet type after first is received
+            // and to run log data saving after all desired packets were received
+
+            // If it's time to poll ESC and an ESC ID is known, send out get values request
+            if (vesc_id_count != 0 && (next_sample + (100000 / LOG_SAMPLE_RATE)) < get_absolute_time())
             {
-                // non VESC message
-                DBG_PRINT("Rx CAN msg: ID 0x%08X, %d data bytes\n", cur_msg.id, cur_msg.dlc);
+                // Decide on an ID for the display if one isn't known already
+                while (!display_can_id)
+                {
+                    temp_id = (uint8_t) get_rand_32();
+
+                    for (uint8_t idn = 0; idn < VESC_CAN_ID_MAX; idn++)
+                    {
+                        // If the ID matches an existing one
+                        if (temp_id == vesc_can_ids[idn])
+                        {
+                            temp_id = 0;
+                        }
+                    }
+
+                    // If the temp ID didn't get cleared, we can use it
+                    if (temp_id)
+                    {
+                        display_can_id = temp_id;
+                    }
+                }
+
+                // Create request can2040_msg
+                cur_msg.id = (CAN_PACKET_PROCESS_SHORT_BUFFER << 8) | vesc_can_ids[0] | CAN2040_ID_EFF;
+                cur_msg.data[0] = display_can_id;
+                cur_msg.data[1] = 0;
+                cur_msg.data[2] = COMM_GET_VALUES;
+                cur_msg.data[3] = 0;
+                cur_msg.dlc = 4;    // Only need to send 4 bytes of data
+                filtered_cmd = CAN_PACKET_FILL_RX_BUFFER;   // Set message filter                
+
+                while (can2040_check_transmit(&cbus) == 0); // Block until message can be sent out
+                
+                can2040_transmit(&cbus, &cur_msg);
+                msg_send_time = get_absolute_time();    // Record time sent 
+                next_sample = delayed_by_ms(next_sample, 1000 / LOG_SAMPLE_RATE);
+
+                last_response_offset = 0x46;
+            }
+
+            // If we're waiting for a reply and it has taken too long
+            if (filtered_cmd && (msg_send_time + 1000 * COMM_MSG_TIMEOUT_MS) < get_absolute_time())
+            {
+                filtered_cmd = 0;
+                vesc_connected = 0;
             }
         }
-        
+        else
+        {
+            // CAN is not being used, keep msg buffer clear
+            can_msg_buf.pop();
+        }
     }
+    
 
     next_sample = get_absolute_time();
     while (true)
@@ -698,11 +788,6 @@ void core1_entry()
 
         sleep_until(next_sample);
         next_sample = delayed_by_ms(next_sample, 1000 / LOG_SAMPLE_RATE);
-
-        // Blink LED to show that communication is happening
-        // gpio_put(LED_PIN, 1);
-        // sleep_ms(50);
-        // gpio_put(LED_PIN, 0);
 
         // Prepare COMM_GET_VALUES_SELECTIVE packet
         packet_init(uart0_write, process_data, &vesc_comm);
@@ -724,7 +809,7 @@ void core1_entry()
 
 
         // Wait for the response packet and process it
-        vesc_connected = receive_packet(&vesc_comm);
+        vesc_connected = receive_packet_uart(&vesc_comm);
 
         
         // Prepare COMM_GET_DECODED_ADC packet
@@ -740,7 +825,7 @@ void core1_entry()
         packet_reset(&vesc_comm);    
 
         // Wait for the response packet and process it
-        receive_packet(&vesc_comm);      
+        receive_packet_uart(&vesc_comm);      
 
 
         ///////////// Logging /////////////
@@ -785,14 +870,14 @@ void process_data(uint8_t *data, size_t len)
     static float prev_kph = 0;
     static absolute_time_t prev_time_sample = get_absolute_time();
 
+    full_packet_received = 1;   // If this callback is running, it means a full packet was received and parsed
 
     switch (packet_id)
     {
-        case COMM_GET_VALUES:
         case COMM_GET_VALUES_SELECTIVE:
-
             // First 4 bytes are get_values_selective 32b mask
             idx += 4;
+        case COMM_GET_VALUES:            
 
             mutex_enter_blocking(float_mutex);
 
@@ -878,7 +963,8 @@ static void __not_in_flash_func(can2040_cb)(struct can2040 *cd, uint32_t notify,
             break;
 
         case CAN2040_NOTIFY_ERROR:
-            DBG_PRINT("ERR\n");
+            DBG_PRINT("CAN error.\n");
             break;
     }
 }
+
