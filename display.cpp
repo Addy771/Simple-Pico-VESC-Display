@@ -93,6 +93,7 @@ uint8_t awaiting_response;
 uint32_t real_baudrate = 0;
 uint8_t response_code = 0;
 uint8_t vesc_connected = 0;
+uint8_t do_logging = 0;
 
 uint8_t get_values_response[100];
 
@@ -511,19 +512,19 @@ int main()
 
     //         prev_kph = data_pt.speed_kph;
     //         prev_time_sample = get_absolute_time();
-
-    //         display.set_cursor(0,0);
-    //         char debug_string[200];
-    //         sprintf(debug_string,"odometer:%f\n\
-    //         kph:%f\n\
-    //         erpm:%f\n\
-    //         prev_kph:%f\n\
-    //         average_speed:%f\n\
-    //         time_us:%d\n\
-    //         distance_trv:%f\n\
-    //         ",data_pt.odometer,data_pt.speed_kph,data_pt.rpm,prev_kph,average_speed,time_us,distance_travelled);
-    //         display.print(debug_string);
-
+    /*
+            display.set_cursor(0,0);
+            char debug_string[200];
+            sprintf(debug_string,"odometer:%f\n\
+            kph:%f\n\
+            erpm:%f\n\
+            prev_kph:%f\n\
+            average_speed:%f\n\
+            time_us:%d\n\
+            distance_trv:%f\n\
+            ",data_pt.odometer,data_pt.speed_kph,data_pt.rpm,prev_kph,average_speed,time_us,distance_travelled);
+            display.print(debug_string);
+    */
     //     default:
     //         break;}
     //     }
@@ -635,6 +636,34 @@ static void PIOx_IRQHandler(void)
 // Second core thread. Handles UART/CAN communication and SD card logging
 void core1_entry()
 {
+    /* Handle any config reads first */
+    // Build Packet for config reads
+    /* TODO: Get 
+        wheel diameter
+        motor poles
+        battery voltage
+        battery AH
+        gear ratio
+        fet temp limit start/end
+        motor temp limit start/end
+    */
+
+    // UART related
+    PACKET_STATE_t vesc_comm;
+    uint8_t send_payload[50];
+    int32_t send_pl_idx = 0;
+
+    // CAN related
+    can2040_msg cur_msg;
+    uint8_t vesc_id;
+    uint8_t cmd_id;
+    uint8_t temp_id;
+    page_ctrl.nv_settings.data.flags |= COMM_USE_CAN;    ///// debug override
+    absolute_time_t msg_send_time;
+
+    absolute_time_t next_sample;    
+    FRESULT result;
+
     DBG_PRINT("Core 1 launched.\n");
 
     memset(vesc_can_ids, 0, VESC_CAN_ID_MAX); // Clear array of VESC CAN IDs
@@ -663,35 +692,11 @@ void core1_entry()
         display_can_id = page_ctrl.nv_settings.data.user_disp_can_id;
     }    
 
-    PACKET_STATE_t vesc_comm;
-    uint8_t send_payload[50];
-    int32_t send_pl_idx = 0;
-    absolute_time_t next_sample, sample_time;
-
-    /* Handle any config reads first */
-    // Build Packet for config reads
-    /* TODO: Get 
-        wheel diameter
-        motor poles
-        battery voltage
-        battery AH
-        gear ratio
-        fet temp limit start/end
-        motor temp limit start/end
-    */
-
-    // CAN test
-    can2040_msg cur_msg;
-    uint8_t vesc_id;
-    uint8_t cmd_id;
-    uint8_t temp_id;
-    uint32_t idx;
-    page_ctrl.nv_settings.data.flags |= COMM_USE_CAN;    ///// debug override
-    absolute_time_t msg_send_time;
-
     next_sample = get_absolute_time();    
     while (true)
     {
+        mutex_enter_blocking(flash_mutex);  // Don't allow flash erase/write while running core1 code
+
         // Handle CAN messages if CAN mode is enabled
         if (page_ctrl.nv_settings.data.flags & COMM_USE_CAN)
         {
@@ -704,10 +709,8 @@ void core1_entry()
                 {
                     vesc_id = cur_msg.id & 0xFF;        // low byte of ID is VESC unit ID
                     cmd_id = (cur_msg.id & 0xFF00) >> 8;  // second byte of ID is command type
-                    idx = 0;
 
                     //DBG_PRINT("CAN_ID=%08X VESC ID=0x%02X CMD=%d DAT=%dB\n", cur_msg.id, vesc_id, cmd_id, cur_msg.dlc);
-
 
                     // If VESC ID is not known, use the ID from the first VESC message we see
                     if (vesc_id_count == 0)
@@ -718,9 +721,7 @@ void core1_entry()
 
                     //DBG_PRINT("VESC=0x%02X CMD=%d DATA(%d)=%08X%08X\n", vesc_id, cmd_id, cur_msg.dlc, cur_msg.data32[1], cur_msg.data32[0]);
 
-                    //uint32_t interrupt_status = save_and_disable_interrupts();
                     receive_packet_can(&cur_msg, cmd_id);
-                    //restore_interrupts(interrupt_status);
                 }
                 else
                 {
@@ -735,6 +736,8 @@ void core1_entry()
             // If it's time to poll ESC and an ESC ID is known, send out requests for data
             if (vesc_id_count != 0 && (next_sample + (100000 / LOG_SAMPLE_RATE)) < get_absolute_time())
             {
+                next_sample = delayed_by_ms(next_sample, 1000 / LOG_SAMPLE_RATE);
+
                 // Decide on an ID for the display if one isn't known already
                 while (!display_can_id)
                 {
@@ -774,9 +777,7 @@ void core1_entry()
                 cur_msg.data[3] = 0;
                 cur_msg.dlc = 4;    // Only need to send 4 bytes of data               
 
-                can_tx_buf.push(cur_msg);  // Add message to transmit queue                
-
-                next_sample = delayed_by_ms(next_sample, 1000 / LOG_SAMPLE_RATE);
+                can_tx_buf.push(cur_msg);  // Add message to transmit queue       
             }
 
             // Transmit messages in the queue when possible
@@ -799,89 +800,81 @@ void core1_entry()
         }
         else
         {
-            // CAN is not being used, keep msg buffer clear
+            // UART mode; CAN is not being used, keep msg buffer clear
             can_rx_buf.pop();
+
+            // If it's time to send out the next requests
+            if ((next_sample + (100000 / LOG_SAMPLE_RATE)) < get_absolute_time())
+            {
+                next_sample = delayed_by_ms(next_sample, 1000 / LOG_SAMPLE_RATE);
+
+                // Prepare COMM_GET_VALUES_SELECTIVE packet
+                packet_init(uart0_write, process_data, &vesc_comm);
+                memset(send_payload, 0, sizeof(send_payload));
+                send_pl_idx = 0;
+
+                // Payload: packet ID, value mask
+                send_payload[send_pl_idx++] = COMM_GET_VALUES_SELECTIVE;
+                static uint32_t get_values_mask = 0xFFFFFFFF;
+                buffer_append_uint32(send_payload, get_values_mask, &send_pl_idx);
+
+                packet_send_packet(send_payload, send_pl_idx, &vesc_comm);
+
+                // Reset packet that was sent so it can be reused
+                packet_reset(&vesc_comm);
+
+                // Wait for the response packet and process it
+                vesc_connected = receive_packet_uart(&vesc_comm);
+                
+                // Prepare COMM_GET_DECODED_ADC packet
+                packet_init(uart0_write, process_data, &vesc_comm);
+                memset(send_payload, 0, sizeof(send_payload));
+                send_pl_idx = 0;
+
+                // Payload: packet ID
+                send_payload[send_pl_idx++] = COMM_GET_DECODED_ADC;
+                packet_send_packet(send_payload, send_pl_idx, &vesc_comm);
+
+                // Reset packet that was sent so it can be reused
+                packet_reset(&vesc_comm);    
+
+                // Wait for the response packet and process it
+                receive_packet_uart(&vesc_comm);   
+            }
         }
-    }
-    
-
-    next_sample = get_absolute_time();
-    while (true)
-    {
-        mutex_enter_blocking(flash_mutex);  // Don't allow flash erase/write while running core1 code
-
-        sleep_until(next_sample);
-        next_sample = delayed_by_ms(next_sample, 1000 / LOG_SAMPLE_RATE);
-
-        // Prepare COMM_GET_VALUES_SELECTIVE packet
-        packet_init(uart0_write, process_data, &vesc_comm);
-        memset(send_payload, 0, sizeof(send_payload));
-        send_pl_idx = 0;
-
-        // Payload: packet ID, value mask
-        send_payload[send_pl_idx++] = COMM_GET_VALUES_SELECTIVE;
-        static uint32_t get_values_mask = 0xFFFFFFFF;
-        buffer_append_uint32(send_payload, get_values_mask, &send_pl_idx);
-
-        packet_send_packet(send_payload, send_pl_idx, &vesc_comm);
-
-        // Record time that data was sampled
-        sample_time = get_absolute_time();
-
-        // Reset packet that was sent so it can be reused
-        packet_reset(&vesc_comm);
-
-
-        // Wait for the response packet and process it
-        vesc_connected = receive_packet_uart(&vesc_comm);
-
-        
-        // Prepare COMM_GET_DECODED_ADC packet
-        packet_init(uart0_write, process_data, &vesc_comm);
-        memset(send_payload, 0, sizeof(send_payload));
-        send_pl_idx = 0;
-
-        // Payload: packet ID
-        send_payload[send_pl_idx++] = COMM_GET_DECODED_ADC;
-        packet_send_packet(send_payload, send_pl_idx, &vesc_comm);
-
-        // Reset packet that was sent so it can be reused
-        packet_reset(&vesc_comm);    
-
-        // Wait for the response packet and process it
-        receive_packet_uart(&vesc_comm);      
 
 
         ///////////// Logging /////////////
-
-        FRESULT result;
-
+        // CAN gets disabled during SD i/o so CAN interrupts don't affect log writes
+  
         // If SD_DETECT_GPIO == 0 an SD card is connected
         if (sd_status == SD_NOT_PRESENT && gpio_get(SD_DETECT_GPIO) == 0)
         {
             DBG_PRINT(/*"\033[2J\033[H"*/ "FILESYSTEM INIT\n");
+            can2040_stop(&cbus);            
             result = init_filesystem();
 
             DBG_PRINT("init_filesystem(): %s\n", FRESULT_str(result));
             sleep_ms(1);
 
             result = create_log_file();    
+            can2040_start(&cbus, frequency_count_khz(CLOCKS_FC0_SRC_VALUE_CLK_SYS)*1000, CAN_BAUDRATE, CAN_RX_GPIO, CAN_TX_GPIO);           
             
             DBG_PRINT("create_log_file(): %s\n", FRESULT_str(result));
             sleep_ms(1);
 
         }
-        else if(sd_status == SD_PRESENT && vesc_connected)
+        else if(do_logging && sd_status == SD_PRESENT && vesc_connected)
         {
+            do_logging = 0;
+            can2040_stop(&cbus);
             result = append_data_pt(data_pt);       
+            can2040_start(&cbus, frequency_count_khz(CLOCKS_FC0_SRC_VALUE_CLK_SYS)*1000, CAN_BAUDRATE, CAN_RX_GPIO, CAN_TX_GPIO);
 
             DBG_PRINT("append_data_pt(): %s\n", FRESULT_str(result));            
         }
 
-        //DBG_PRINT("sd_status: %d, vesc_connected:%d\r", sd_status, vesc_connected);
-
-
-        mutex_exit(flash_mutex);    // Release lock
+        mutex_exit(flash_mutex);    // Release lock        
     }
 }
 
@@ -964,6 +957,8 @@ void process_data(uint8_t *data, size_t len)
             adc_v2 = buffer_get_float32(data, 1e6, &idx);
             mutex_exit(float_mutex);
 
+            // This is the last request packet response, so now we can save the data to the log file
+            do_logging = 1;
             break;
 
     }

@@ -35,7 +35,7 @@ page_controller::page_controller(void)
     // Add page functions to list
     page_fn[0] = (page_draw_fn) &page_controller::page_main_draw;
     page_fn[1] = (page_draw_fn) &page_controller::page_log_draw;
-    page_idx = 0;
+    page_idx = 1;
 
     // Log system init
     u8log_Init(&u8log, U8LOG_WIDTH, U8LOG_HEIGHT, u8log_buf);
