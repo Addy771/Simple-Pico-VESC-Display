@@ -83,12 +83,12 @@ static void can2040_cb(struct can2040 *cd, uint32_t notify, struct can2040_msg *
 void process_data(uint8_t *data, size_t len);
 
 static struct can2040 cbus;
-volatile circular_buf<can2040_msg, 20> can_msg_buf;
+volatile circular_buf<can2040_msg, 20> can_rx_buf;
+circular_buf<can2040_msg, 10> can_tx_buf;
 uint8_t vesc_can_ids[VESC_CAN_ID_MAX];
 uint8_t vesc_id_count = 0;
 uint8_t display_can_id = 0;
-uint8_t full_packet_received = 0;
-uint last_response_offset;
+uint8_t awaiting_response;
 
 uint32_t real_baudrate = 0;
 uint8_t response_code = 0;
@@ -577,18 +577,27 @@ void receive_packet_can(can2040_msg *rx_msg, uint8_t can_command_id)
     switch (can_command_id)
     {
         case CAN_PACKET_FILL_RX_BUFFER:
-            //DBG_PRINT("Filling RX buffer at offset 0x%02X\n", rx_msg->data[0]);
-            // Copy the 7 data bytes into the rx buffer
-            for (uint buf_offset = 0; buf_offset < 7; buf_offset++)
+            // Only process this packet if it was sent to the display specifically
+            if ((rx_msg->id & 0xFF) == display_can_id)
             {
-                rx_buffer[rx_msg->data[0] + buf_offset] = rx_msg->data[1+buf_offset];
+                //DBG_PRINT("Filling RX buffer at offset 0x%02X\n", rx_msg->data[0]);
+                // Copy the 7 data bytes into the rx buffer
+                for (uint buf_offset = 0; buf_offset < 7; buf_offset++)
+                {
+                    rx_buffer[rx_msg->data[0] + buf_offset] = rx_msg->data[1+buf_offset];
+                }
             }
             break;
 
         case CAN_PACKET_PROCESS_RX_BUFFER:
-            buffer_len = (rx_msg->data[2] << 8) | rx_msg->data[3];
-            //DBG_PRINT("Processing RX buf of length %d\n", buffer_len);
-            process_data(rx_buffer, buffer_len);
+            // Only process this packet if it was sent to the display specifically
+            if ((rx_msg->id & 0xFF) == display_can_id)
+            {        
+                buffer_len = (rx_msg->data[2] << 8) | rx_msg->data[3];
+                //DBG_PRINT("Processing RX buf of length %d\n", buffer_len);
+                process_data(rx_buffer, buffer_len);
+                awaiting_response = 0;
+            }
             break;
 
         case CAN_PACKET_NOTIFY_BOOT:
@@ -677,7 +686,6 @@ void core1_entry()
     uint8_t cmd_id;
     uint8_t temp_id;
     uint32_t idx;
-    uint8_t filtered_cmd = 0;
     page_ctrl.nv_settings.data.flags |= COMM_USE_CAN;    ///// debug override
     absolute_time_t msg_send_time;
 
@@ -687,9 +695,9 @@ void core1_entry()
         // Handle CAN messages if CAN mode is enabled
         if (page_ctrl.nv_settings.data.flags & COMM_USE_CAN)
         {
-            if (!can_msg_buf.is_empty())
+            if (!can_rx_buf.is_empty())
             {
-                cur_msg = can_msg_buf.pop();
+                cur_msg = can_rx_buf.pop();
 
                 // MS bytes should be 0x8000 for VESC messages
                 if ((cur_msg.id & 0xFFFF0000) == 0x80000000)
@@ -724,7 +732,7 @@ void core1_entry()
             // Need some method to send next packet type after first is received
             // and to run log data saving after all desired packets were received
 
-            // If it's time to poll ESC and an ESC ID is known, send out get values request
+            // If it's time to poll ESC and an ESC ID is known, send out requests for data
             if (vesc_id_count != 0 && (next_sample + (100000 / LOG_SAMPLE_RATE)) < get_absolute_time())
             {
                 // Decide on an ID for the display if one isn't known already
@@ -748,35 +756,51 @@ void core1_entry()
                     }
                 }
 
-                // Create request can2040_msg
+                // Create COMM_GET_VALUES request
                 cur_msg.id = (CAN_PACKET_PROCESS_SHORT_BUFFER << 8) | vesc_can_ids[0] | CAN2040_ID_EFF;
                 cur_msg.data[0] = display_can_id;
                 cur_msg.data[1] = 0;
                 cur_msg.data[2] = COMM_GET_VALUES;
                 cur_msg.data[3] = 0;
-                cur_msg.dlc = 4;    // Only need to send 4 bytes of data
-                filtered_cmd = CAN_PACKET_FILL_RX_BUFFER;   // Set message filter                
+                cur_msg.dlc = 4;    // Only need to send 4 bytes of data               
 
-                while (can2040_check_transmit(&cbus) == 0); // Block until message can be sent out
-                
-                can2040_transmit(&cbus, &cur_msg);
-                msg_send_time = get_absolute_time();    // Record time sent 
+                can_tx_buf.push(cur_msg);  // Add message to transmit queue
+
+                // Create COMM_GET_DECODED_ADC request
+                cur_msg.id = (CAN_PACKET_PROCESS_SHORT_BUFFER << 8) | vesc_can_ids[0] | CAN2040_ID_EFF;
+                cur_msg.data[0] = display_can_id;
+                cur_msg.data[1] = 0;
+                cur_msg.data[2] = COMM_GET_DECODED_ADC;
+                cur_msg.data[3] = 0;
+                cur_msg.dlc = 4;    // Only need to send 4 bytes of data               
+
+                can_tx_buf.push(cur_msg);  // Add message to transmit queue                
+
                 next_sample = delayed_by_ms(next_sample, 1000 / LOG_SAMPLE_RATE);
+            }
 
-                last_response_offset = 0x46;
+            // Transmit messages in the queue when possible
+            if (!awaiting_response && !can_tx_buf.is_empty())
+            {
+                while (can2040_check_transmit(&cbus) == 0); // Block until message can be sent out
+                cur_msg = can_tx_buf.pop();
+
+                can2040_transmit(&cbus, &cur_msg);
+                msg_send_time = get_absolute_time();    // Record time sent                 
+                awaiting_response = 1;
             }
 
             // If we're waiting for a reply and it has taken too long
-            if (filtered_cmd && (msg_send_time + 1000 * COMM_MSG_TIMEOUT_MS) < get_absolute_time())
+            if (awaiting_response && (msg_send_time + 1000 * COMM_MSG_TIMEOUT_MS) < get_absolute_time())
             {
-                filtered_cmd = 0;
                 vesc_connected = 0;
+                awaiting_response = 0;
             }
         }
         else
         {
             // CAN is not being used, keep msg buffer clear
-            can_msg_buf.pop();
+            can_rx_buf.pop();
         }
     }
     
@@ -869,8 +893,7 @@ void process_data(uint8_t *data, size_t len)
     uint8_t packet_id = data[idx++];
     static float prev_kph = 0;
     static absolute_time_t prev_time_sample = get_absolute_time();
-
-    full_packet_received = 1;   // If this callback is running, it means a full packet was received and parsed
+    vesc_connected = 1;     // If this function is running, a response was successfully received
 
     switch (packet_id)
     {
@@ -955,7 +978,7 @@ static void __not_in_flash_func(can2040_cb)(struct can2040 *cd, uint32_t notify,
     {
         case CAN2040_NOTIFY_RX:
             // DBG_PRINT("Rx'd\n");
-            can_msg_buf.push(*msg);
+            can_rx_buf.push(*msg);
             break;
 
         case CAN2040_NOTIFY_TX:
