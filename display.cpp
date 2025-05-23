@@ -663,8 +663,18 @@ void core1_entry()
 
     absolute_time_t next_sample;    
     FRESULT result;
+    char time_str[25];
+    datetime_t current_time;
 
     DBG_PRINT("Core 1 launched.\n");
+
+    if (rtc_time_valid)
+    {
+        rtc_get_datetime(&current_time);
+        time_to_str(&current_time, time_str, 0);
+        DBG_PRINT("RTC time: %s\n", time_str);
+    }
+
 
     memset(vesc_can_ids, 0, VESC_CAN_ID_MAX); // Clear array of VESC CAN IDs
 

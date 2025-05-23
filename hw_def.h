@@ -160,6 +160,7 @@ void set_rtc_time(datetime_t current_time);
 void get_rtc_time(datetime_t *rtc_time);
 void set_rtc_sram(uint8_t sram_address, uint8_t *data, uint8_t len);
 void get_rtc_sram(uint8_t sram_address, uint8_t *data, uint8_t len);
+void time_to_str(datetime_t *time, char *result_str, uint8_t date_only);
 
 
 #if CAN_PIO_UNIT_NUM == 0

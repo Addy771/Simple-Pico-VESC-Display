@@ -107,6 +107,7 @@ void init_external_rtc(void)
     uint8_t rx_byte;
     int32_t ret;
     uint8_t transmit_buf[2];
+    datetime_t ext_rtc_time;
 
     rtc_init(); // on-chip RTC
 
@@ -145,9 +146,14 @@ void init_external_rtc(void)
         i2c_read_blocking(RTC_I2C_UNIT, RTC_I2C_ADDR, &rx_byte, 1, false);      
 
         if (rx_byte == RTC_KEY_VALUE)
+        {
             rtc_time_valid = 1;
+            get_rtc_time(&ext_rtc_time);    // Get time from external RTC, which will sync the on-chip RTC as well
+        }
         else
+        {
             rtc_time_valid = 0;
+        }
     }
     else
     {
@@ -233,4 +239,17 @@ void get_rtc_sram(uint8_t sram_address, uint8_t *data, uint8_t len)
     i2c_write_blocking(RTC_I2C_UNIT, RTC_I2C_ADDR, &sram_address, 1, false); // set register pointer
     
     i2c_read_blocking(RTC_I2C_UNIT, RTC_I2C_ADDR, data, 7, len);
+}
+
+
+// Convert a datetime_t to a string representation of the date and optionally time
+void time_to_str(datetime_t *time, char *result_str, uint8_t date_only)
+{
+    uint8_t str_pos;
+    str_pos = sprintf(result_str, "%d-%d-%d", (*time).year, (*time).month, (*time).day);
+
+    if (!date_only)
+    {
+        sprintf(result_str + str_pos, " %d:%02d:%02d", (*time).hour, (*time).min, (*time).sec);
+    }
 }
