@@ -82,9 +82,16 @@ void core1_entry();
 static void can2040_cb(struct can2040 *cd, uint32_t notify, struct can2040_msg *msg);
 void process_data(uint8_t *data, size_t len);
 
+typedef struct
+{
+    uint8_t msg[6];
+    uint8_t length;
+} comm_msg;
+
 static struct can2040 cbus;
 volatile circular_buf<can2040_msg, 20> can_rx_buf;
 circular_buf<can2040_msg, 10> can_tx_buf;
+circular_buf<comm_msg, 10> comm_request_buf;
 uint8_t vesc_can_ids[VESC_CAN_ID_MAX];
 uint8_t vesc_id_count = 0;
 uint8_t display_can_id = 0;
@@ -651,20 +658,20 @@ void core1_entry()
     // UART related
     PACKET_STATE_t vesc_comm;
     uint8_t send_payload[50];
-    int32_t send_pl_idx = 0;
 
     // CAN related
     can2040_msg cur_msg;
     uint8_t vesc_id;
     uint8_t cmd_id;
     uint8_t temp_id;
-    page_ctrl.nv_settings.data.flags |= COMM_USE_CAN;    ///// debug override
+    page_ctrl.nv_settings.data.flags = 0;//|= COMM_USE_CAN;    ///// debug override
     absolute_time_t msg_send_time;
 
     absolute_time_t next_sample;    
     FRESULT result;
     char time_str[25];
     datetime_t current_time;
+    comm_msg request_msg;
 
     DBG_PRINT("Core 1 launched.\n");
 
@@ -707,6 +714,22 @@ void core1_entry()
     {
         mutex_enter_blocking(flash_mutex);  // Don't allow flash erase/write while running core1 code
 
+        // Add request messages to queue if it's time to get updated data from ESC
+        if ((next_sample + (100000 / LOG_SAMPLE_RATE)) < get_absolute_time())
+        {
+            next_sample = delayed_by_ms(next_sample, 1000 / LOG_SAMPLE_RATE);        
+
+            memset(request_msg.msg, 0, 6); 
+            request_msg.msg[0] = COMM_GET_VALUES;
+            request_msg.length = 1;
+            comm_request_buf.push(request_msg);
+
+            request_msg.msg[0] = COMM_GET_DECODED_ADC;
+            request_msg.length = 1;
+            comm_request_buf.push(request_msg);
+            
+        }
+
         // Handle CAN messages if CAN mode is enabled
         if (page_ctrl.nv_settings.data.flags & COMM_USE_CAN)
         {
@@ -744,10 +767,9 @@ void core1_entry()
             // and to run log data saving after all desired packets were received
 
             // If it's time to poll ESC and an ESC ID is known, send out requests for data
-            if (vesc_id_count != 0 && (next_sample + (100000 / LOG_SAMPLE_RATE)) < get_absolute_time())
+            //if (vesc_id_count != 0 && (next_sample + (100000 / LOG_SAMPLE_RATE)) < get_absolute_time())
+            if(vesc_id_count != 0 && !comm_request_buf.is_empty())
             {
-                next_sample = delayed_by_ms(next_sample, 1000 / LOG_SAMPLE_RATE);
-
                 // Decide on an ID for the display if one isn't known already
                 while (!display_can_id)
                 {
@@ -768,26 +790,18 @@ void core1_entry()
                         display_can_id = temp_id;
                     }
                 }
-
-                // Create COMM_GET_VALUES request
-                cur_msg.id = (CAN_PACKET_PROCESS_SHORT_BUFFER << 8) | vesc_can_ids[0] | CAN2040_ID_EFF;
-                cur_msg.data[0] = display_can_id;
-                cur_msg.data[1] = 0;
-                cur_msg.data[2] = COMM_GET_VALUES;
-                cur_msg.data[3] = 0;
-                cur_msg.dlc = 4;    // Only need to send 4 bytes of data               
-
-                can_tx_buf.push(cur_msg);  // Add message to transmit queue
-
-                // Create COMM_GET_DECODED_ADC request
-                cur_msg.id = (CAN_PACKET_PROCESS_SHORT_BUFFER << 8) | vesc_can_ids[0] | CAN2040_ID_EFF;
-                cur_msg.data[0] = display_can_id;
-                cur_msg.data[1] = 0;
-                cur_msg.data[2] = COMM_GET_DECODED_ADC;
-                cur_msg.data[3] = 0;
-                cur_msg.dlc = 4;    // Only need to send 4 bytes of data               
-
-                can_tx_buf.push(cur_msg);  // Add message to transmit queue       
+        
+                // Process comm requests into CAN request messages
+                while (!comm_request_buf.is_empty())
+                {
+                    request_msg = comm_request_buf.pop();
+                    cur_msg.id = (CAN_PACKET_PROCESS_SHORT_BUFFER << 8) | vesc_can_ids[0] | CAN2040_ID_EFF;
+                    cur_msg.data[0] = display_can_id;
+                    cur_msg.data[1] = 0;         
+                    memcpy(&cur_msg.data[2], request_msg.msg, request_msg.length);
+                    cur_msg.dlc = 2 + request_msg.length;
+                    can_tx_buf.push(cur_msg);
+                }
             }
 
             // Transmit messages in the queue when possible
@@ -813,37 +827,16 @@ void core1_entry()
             // UART mode; CAN is not being used, keep msg buffer clear
             can_rx_buf.pop();
 
-            // If it's time to send out the next requests
-            if ((next_sample + (100000 / LOG_SAMPLE_RATE)) < get_absolute_time())
+            // Send out comm request messages and process the responses
+            while (!comm_request_buf.is_empty())
             {
-                next_sample = delayed_by_ms(next_sample, 1000 / LOG_SAMPLE_RATE);
+                request_msg = comm_request_buf.pop();
 
-                // Prepare COMM_GET_VALUES_SELECTIVE packet
                 packet_init(uart0_write, process_data, &vesc_comm);
                 memset(send_payload, 0, sizeof(send_payload));
-                send_pl_idx = 0;
+                memcpy(send_payload, request_msg.msg, request_msg.length);
 
-                // Payload: packet ID, value mask
-                send_payload[send_pl_idx++] = COMM_GET_VALUES_SELECTIVE;
-                static uint32_t get_values_mask = 0xFFFFFFFF;
-                buffer_append_uint32(send_payload, get_values_mask, &send_pl_idx);
-
-                packet_send_packet(send_payload, send_pl_idx, &vesc_comm);
-
-                // Reset packet that was sent so it can be reused
-                packet_reset(&vesc_comm);
-
-                // Wait for the response packet and process it
-                vesc_connected = receive_packet_uart(&vesc_comm);
-                
-                // Prepare COMM_GET_DECODED_ADC packet
-                packet_init(uart0_write, process_data, &vesc_comm);
-                memset(send_payload, 0, sizeof(send_payload));
-                send_pl_idx = 0;
-
-                // Payload: packet ID
-                send_payload[send_pl_idx++] = COMM_GET_DECODED_ADC;
-                packet_send_packet(send_payload, send_pl_idx, &vesc_comm);
+                packet_send_packet(send_payload, request_msg.length, &vesc_comm);
 
                 // Reset packet that was sent so it can be reused
                 packet_reset(&vesc_comm);    
