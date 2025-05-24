@@ -667,7 +667,8 @@ void core1_entry()
     page_ctrl.nv_settings.data.flags = 0;//|= COMM_USE_CAN;    ///// debug override
     absolute_time_t msg_send_time;
 
-    absolute_time_t next_sample;    
+    absolute_time_t next_sample;  
+    absolute_time_t comm_retry;  
     FRESULT result;
     char time_str[25];
     datetime_t current_time;
@@ -709,13 +710,25 @@ void core1_entry()
         display_can_id = page_ctrl.nv_settings.data.user_disp_can_id;
     }    
 
+
     next_sample = get_absolute_time();    
+    comm_retry = delayed_by_ms(get_absolute_time(), 10*COMM_MSG_TIMEOUT_MS);
     while (true)
     {
         mutex_enter_blocking(flash_mutex);  // Don't allow flash erase/write while running core1 code
 
+        if (!page_ctrl.config_received && comm_retry < get_absolute_time())
+        {
+            // Generate config request messages
+            memset(request_msg.msg, 0, 6);     
+            request_msg.msg[0] = COMM_GET_MCCONF_TEMP;
+            request_msg.length = 1;
+            comm_request_buf.push(request_msg);            
+            comm_retry = delayed_by_ms(get_absolute_time(), 10*COMM_MSG_TIMEOUT_MS);
+        }
+
         // Add request messages to queue if it's time to get updated data from ESC
-        if ((next_sample + (100000 / LOG_SAMPLE_RATE)) < get_absolute_time())
+        if (next_sample < get_absolute_time())
         {
             next_sample = delayed_by_ms(next_sample, 1000 / LOG_SAMPLE_RATE);        
 
@@ -785,7 +798,7 @@ void core1_entry()
                     }
 
                     // If the temp ID didn't get cleared, we can use it
-                    if (temp_id)
+                    if (temp_id && temp_id != 0xFF)
                     {
                         display_can_id = temp_id;
                     }
@@ -962,6 +975,20 @@ void process_data(uint8_t *data, size_t len)
 
             // This is the last request packet response, so now we can save the data to the log file
             do_logging = 1;
+            break;
+
+        case COMM_GET_MCCONF_TEMP:
+            page_ctrl.config_received = 1;
+            idx += 40;  // Skip past config info we don't use
+            page_ctrl.motor_poles = data[idx++];
+
+            mutex_enter_blocking(float_mutex);            
+            page_ctrl.gear_ratio = buffer_get_float32_auto(data, &idx);
+            page_ctrl.wheel_diameter = buffer_get_float32_auto(data, &idx);
+            DBG_PRINT("Received ESC motor config:\n");
+            DBG_PRINT("%d poles, %.2f gear ratio, \n%.2fmm wheel diameter\n",
+                page_ctrl.motor_poles, page_ctrl.gear_ratio, page_ctrl.wheel_diameter*1000);
+            mutex_exit(float_mutex);            
             break;
 
     }

@@ -54,6 +54,10 @@ class page_controller
         mutex_t flash_mutex;
         nv_flash_storage nv_settings;
         log_data_t esc_data;
+        uint8_t motor_poles;
+        float gear_ratio;
+        float wheel_diameter;
+        uint8_t config_received;
 
 
         page_controller(void);

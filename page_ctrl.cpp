@@ -40,6 +40,8 @@ page_controller::page_controller(void)
     // Log system init
     u8log_Init(&u8log, U8LOG_WIDTH, U8LOG_HEIGHT, u8log_buf);
     mutex_init(&log_mutex);
+
+    config_received = 0;
 }
 
 
