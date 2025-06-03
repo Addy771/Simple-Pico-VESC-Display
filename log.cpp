@@ -328,6 +328,7 @@ FRESULT append_data_pt(log_data_t *data)
     f_close(&log_fil);
     f_unmount(pSD->pcName);
 
+    sd_status = SD_PRESENT; // No problems encountered
     return 0;
 }
 

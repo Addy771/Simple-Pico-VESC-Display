@@ -18,7 +18,6 @@ typedef enum
 {
     SD_NOT_PRESENT,
     SD_PRESENT,
-    SD_WRITING,
     SD_ERROR
 } sd_state;
 
@@ -64,7 +63,6 @@ extern uint8_t sd_status;
 FRESULT init_filesystem();
 FRESULT create_log_file();
 FRESULT append_data_pt(log_data_t *data);
-void draw_SD_status(uint8_t x, uint8_t y);
 void print_and_log(const char* format, ...);
 
 #endif

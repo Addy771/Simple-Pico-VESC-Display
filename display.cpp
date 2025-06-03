@@ -99,7 +99,7 @@ uint8_t awaiting_response;
 
 uint32_t real_baudrate = 0;
 uint8_t response_code = 0;
-uint8_t vesc_connected = 0;
+volatile uint8_t vesc_connected = 0;
 uint8_t do_logging = 0;
 
 uint8_t get_values_response[100];
@@ -862,9 +862,14 @@ void core1_entry()
 
         ///////////// Logging /////////////
         // CAN gets disabled during SD i/o so CAN interrupts don't affect log writes
-  
+
+        // Check if SD card was removed
+        if ((sd_status == SD_PRESENT || sd_status == SD_ERROR) && gpio_get(SD_DETECT_GPIO))
+        {
+            sd_status = SD_NOT_PRESENT;
+        }
         // If SD_DETECT_GPIO == 0 an SD card is connected
-        if (sd_status == SD_NOT_PRESENT && gpio_get(SD_DETECT_GPIO) == 0)
+        else if (sd_status == SD_NOT_PRESENT && gpio_get(SD_DETECT_GPIO) == 0)
         {
             DBG_PRINT(/*"\033[2J\033[H"*/ "FILESYSTEM INIT\n");
             can2040_stop(&cbus);            
@@ -880,14 +885,16 @@ void core1_entry()
             sleep_ms(1);
 
         }
-        else if(do_logging && sd_status == SD_PRESENT && vesc_connected)
+        // Try to save data to log, even if there was an error previously
+        else if(do_logging && vesc_connected && (sd_status == SD_PRESENT || sd_status == SD_ERROR))
         {
             do_logging = 0;
             can2040_stop(&cbus);
             result = append_data_pt(data_pt);       
             can2040_start(&cbus, frequency_count_khz(CLOCKS_FC0_SRC_VALUE_CLK_SYS)*1000, CAN_BAUDRATE, CAN_RX_GPIO, CAN_TX_GPIO);
 
-            DBG_PRINT("append_data_pt(): %s\n", FRESULT_str(result));            
+            if (result != FR_OK)
+                DBG_PRINT("append_data_pt(): %s\n", FRESULT_str(result));            
         }
 
         mutex_exit(flash_mutex);    // Release lock        
@@ -902,7 +909,6 @@ void process_data(uint8_t *data, size_t len)
     uint8_t packet_id = data[idx++];
     static float prev_kph = 0;
     static absolute_time_t prev_time_sample = get_absolute_time();
-    vesc_connected = 1;     // If this function is running, a response was successfully received
 
     switch (packet_id)
     {
@@ -910,7 +916,7 @@ void process_data(uint8_t *data, size_t len)
             // First 4 bytes are get_values_selective 32b mask
             idx += 4;
         case COMM_GET_VALUES:            
-
+            vesc_connected = 1; 
             mutex_enter_blocking(float_mutex);
 
             //memcpy(get_values_response, data+5, len-5);
@@ -965,7 +971,7 @@ void process_data(uint8_t *data, size_t len)
             break;
 
         case COMM_GET_DECODED_ADC:
-
+            vesc_connected = 1; 
             mutex_enter_blocking(float_mutex);
             data_pt->adc1_decoded = buffer_get_float32(data, 1e6, &idx);
             adc_v1 = buffer_get_float32(data, 1e6, &idx);
@@ -978,6 +984,7 @@ void process_data(uint8_t *data, size_t len)
             break;
 
         case COMM_GET_MCCONF_TEMP:
+            vesc_connected = 1;         
             page_ctrl.config_received = 1;
             idx += 40;  // Skip past config info we don't use
             page_ctrl.motor_poles = data[idx++];
@@ -989,6 +996,12 @@ void process_data(uint8_t *data, size_t len)
             DBG_PRINT("%d poles, %.2f gear ratio, \n%.2fmm wheel diameter\n",
                 page_ctrl.motor_poles, page_ctrl.gear_ratio, page_ctrl.wheel_diameter*1000);
             mutex_exit(float_mutex);            
+            break;
+
+        case COMM_GET_VALUES_SETUP:
+            vesc_connected = 1;
+
+
             break;
 
     }

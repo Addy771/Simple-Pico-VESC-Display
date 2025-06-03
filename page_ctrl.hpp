@@ -4,6 +4,7 @@
 #include "pico/sync.h"
 #include "nv_flash.hpp"
 #include "log.hpp"
+#include <cstdarg>
 
 #ifndef PAGE_CTRL_H
 #define PAGE_CTRL_H
@@ -15,7 +16,8 @@
 #define BUTTON_LOCK_TIME_MS 50  // After a button is pressed, it won't be checked again until this much time has passed. 
 
 #define U8LOG_WIDTH 42
-#define U8LOG_HEIGHT 12
+#define U8LOG_HEIGHT 11
+#define STATUS_HEIGHT 11
 
 typedef void (*page_draw_fn)();
 
@@ -31,6 +33,42 @@ typedef enum
     LOAD_A,
     LOAD_B
 } ext_load_map;
+
+
+template<typename TYPE>
+class moving_avg
+{
+    private:
+        TYPE data_val;
+        float new_ratio;
+        float prev_ratio;
+
+    public:
+        // moving_avg(float new_ratio)
+        // {
+        //     data_val = 0;
+        //     prev_ratio = 1 - new_ratio;
+        // }
+        //moving_avg(float new_ratio) : data_val(), prev_ratio(1 - new_ratio) {} 
+        moving_avg() : data_val(), prev_ratio(0.5), new_ratio(0.5) {}
+
+        void set_ratio(float ratio)
+        {
+            new_ratio = ratio;
+            prev_ratio = 1 - ratio;
+        }
+
+        void update(TYPE new_val)
+        {
+            data_val = new_ratio * new_val + prev_ratio * data_val;
+        }
+
+        TYPE get_value(void) const
+        {
+            return data_val;
+        }
+
+};
 
 
 class page_controller
@@ -58,11 +96,14 @@ class page_controller
         float gear_ratio;
         float wheel_diameter;
         uint8_t config_received;
+        moving_avg<float> v_in_smoothed;
 
 
         page_controller(void);
         void update(void);
         void draw_page(void);
+        void draw_string(uint16_t x_coord, uint16_t y_coord, const char* format, ...);
+        void draw_overlay_status(void);
         void update_load_outputs(void);
         void log_write_string(char *log_str);
 
@@ -70,6 +111,5 @@ class page_controller
         void page_main_draw(void);
         void page_log_draw(void);
 };
-
 
 #endif

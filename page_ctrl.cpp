@@ -5,6 +5,17 @@
 #include "pico/bootrom.h"
 #include "pico/sync.h"
 #include "nv_flash.hpp"
+#include "log.hpp"
+#include <cstdarg>
+
+#include "bitmap/sd_ok.xbm"
+#include "bitmap/sd_err.xbm"
+#include "bitmap/sd_none.xbm"
+#include "bitmap/batt_frame.xbm"
+#include "bitmap/batt_unknown.xbm"
+
+
+volatile extern uint8_t vesc_connected;
 
 page_controller::page_controller(void)
 {
@@ -42,6 +53,9 @@ page_controller::page_controller(void)
     mutex_init(&log_mutex);
 
     config_received = 0;
+
+    // Set ratio of weighted moving averages
+    v_in_smoothed.set_ratio(0.3);
 }
 
 
@@ -102,6 +116,8 @@ void page_controller::update(void)
 
     // Common calculations
     mutex_enter_blocking(&float_mutex);
+
+    v_in_smoothed.update(esc_data.v_in);
 
     //     // Update rolling averages
     //     b_cur_avg = (1 - ROLLING_AVG_RATIO) * b_cur_avg + ROLLING_AVG_RATIO * data_pt.current_in;
@@ -177,6 +193,77 @@ void page_controller::draw_page(void)
 }
 
 
+// Draw a string with sprintf 
+void page_controller::draw_string(uint16_t x_coord, uint16_t y_coord, const char* format, ...)
+{
+    static char string_buf[100];
+    va_list args;
+    va_start(args, format);
+
+    vsnprintf(string_buf, sizeof(string_buf), format, args);
+    u8g2_DrawStr(&u8g2, x_coord, y_coord, string_buf);
+}
+
+
+// Status overlay, covers top area of screen
+void page_controller::draw_overlay_status(void)
+{
+    datetime_t rtc_time;
+    // Border line
+    u8g2_DrawHLine(&u8g2, 0, STATUS_HEIGHT - 1, u8g2_GetDisplayWidth(&u8g2));
+
+    u8g2_SetFont(&u8g2, u8g2_font_t0_11_te);
+
+    // VESC connected?
+    // RTC connected?
+    if (rtc_connected)
+    {
+        rtc_get_datetime(&rtc_time);
+        draw_string(104, 9, "%02d:%02d:%02d", rtc_time.hour, rtc_time.min, rtc_time.sec);
+    }
+    else
+    {
+        draw_string(104, 9, "no clock");
+    }
+
+    // SD card working?
+    switch (sd_status)
+    {
+        case SD_PRESENT:
+            u8g2_DrawXBMP(&u8g2, 170, 0, sd_ok_width, sd_ok_height, sd_ok_bits);
+            break;
+
+        case SD_NOT_PRESENT:
+            u8g2_DrawXBMP(&u8g2, 170, 0, sd_none_width, sd_none_height, sd_none_bits);
+            break;
+
+        case SD_ERROR:
+            u8g2_DrawXBMP(&u8g2, 170, 0, sd_err_width, sd_err_height, sd_err_bits);
+            break;
+
+    }
+
+
+    // Wifi status?
+
+    // Battery level/voltage
+    if (vesc_connected)
+    {
+        u8g2_DrawXBMP(&u8g2, 0, 0, batt_frame_width, batt_frame_height, batt_frame_bits);
+        // Fill bar according to battery level
+
+        mutex_enter_blocking(&float_mutex);
+        draw_string(30, 9, "%3.1fV", v_in_smoothed.get_value());
+        mutex_exit(&float_mutex);
+    }
+    else
+    {
+        u8g2_DrawXBMP(&u8g2, 0, 0, batt_unknown_width, batt_unknown_height, batt_unknown_bits);
+    }
+
+}
+
+
 // 
 void page_controller::page_main_draw(void)
 {
@@ -203,14 +290,14 @@ void page_controller::page_main_draw(void)
 void page_controller::page_log_draw(void)
 {
     u8g2_ClearBuffer(&u8g2);
-    // Draw common frame
+    draw_overlay_status();
     // Populate button descriptions
 
     // Set font for log text
     u8g2_SetFont(&u8g2, u8g2_font_t0_11_te);
 
     mutex_enter_blocking(&log_mutex);
-    u8g2_DrawLog(&u8g2, 0, 12, &u8log);    // Draw log text area
+    u8g2_DrawLog(&u8g2, 0, 24, &u8log);    // Draw log text area
     mutex_exit(&log_mutex);
 
     u8g2_SendBuffer(&u8g2);
