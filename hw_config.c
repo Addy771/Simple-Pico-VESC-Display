@@ -51,8 +51,8 @@ static spi_t spis[] = {  // One for each SPI.
         .mosi_gpio = SD_MOSI_GPIO,
         .sck_gpio = SD_SCK_GPIO,
         .set_drive_strength = true,
-        .mosi_gpio_drive_strength = GPIO_DRIVE_STRENGTH_4MA,
-        .sck_gpio_drive_strength = GPIO_DRIVE_STRENGTH_4MA,       
+        .mosi_gpio_drive_strength = GPIO_DRIVE_STRENGTH_8MA,
+        .sck_gpio_drive_strength = GPIO_DRIVE_STRENGTH_8MA,       
 
         .baud_rate = SD_SPI_CLK_HZ, 
 

@@ -23,6 +23,7 @@ typedef struct
     uint8_t flags = 0;
     uint8_t user_vesc_can_id = 0;
     uint8_t user_disp_can_id = 0;
+    uint8_t speed_bar_max = 120;
 } nv_flash_struct;
 
 

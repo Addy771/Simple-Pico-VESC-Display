@@ -46,7 +46,7 @@ page_controller::page_controller(void)
     // Add page functions to list
     page_fn[0] = (page_draw_fn) &page_controller::page_main_draw;
     page_fn[1] = (page_draw_fn) &page_controller::page_log_draw;
-    page_idx = 1;
+    page_idx = 0;
 
     // Log system init
     u8log_Init(&u8log, U8LOG_WIDTH, U8LOG_HEIGHT, u8log_buf);
@@ -56,6 +56,7 @@ page_controller::page_controller(void)
 
     // Set ratio of weighted moving averages
     v_in_smoothed.set_ratio(0.3);
+    speed_smoothed.set_ratio(0.3);
 }
 
 
@@ -64,6 +65,14 @@ void page_controller::update(void)
 {
     uint8_t btn_new_state[BUTTON_COUNT];
     absolute_time_t btn_poll_time;
+
+    ///////////////////////////// TEST /////////////////////////////
+    static uint8_t speed_kph = 0;
+    static int8_t speed_inc = 1;    
+    speed_kph += speed_inc;
+
+    if ((speed_inc > 0 && speed_kph > 120) || (speed_inc < 0 && speed_kph <= 0))
+        speed_inc = speed_inc * -1;
 
     // Handle load output tasks
     update_load_outputs();
@@ -99,7 +108,7 @@ void page_controller::update(void)
         // Inform user that bootloader mode is being entered
         u8g2_ClearBuffer(&u8g2);
         u8g2_SetFont(&u8g2, u8g2_font_10x20_tf);    
-        u8g2_DrawStr(&u8g2, 10, 64, "Entering Bootloader Mode");
+        draw_string(10, 64, "Entering Bootloader Mode");
         u8g2_SendBuffer(&u8g2);
         sleep_ms(1000);
 
@@ -118,6 +127,8 @@ void page_controller::update(void)
     mutex_enter_blocking(&float_mutex);
 
     v_in_smoothed.update(esc_data.v_in);
+
+    speed_smoothed.update(speed_kph);
 
     //     // Update rolling averages
     //     b_cur_avg = (1 - ROLLING_AVG_RATIO) * b_cur_avg + ROLLING_AVG_RATIO * data_pt.current_in;
@@ -264,22 +275,101 @@ void page_controller::draw_overlay_status(void)
 }
 
 
+//  Draw main page speed UI. Includes bar and text speed displays
+void page_controller::draw_speed_bar(uint8_t x, uint8_t y, float speed)
+{
+    static const uint bar_max_speed = nv_settings.data.speed_bar_max;
+    static const uint8_t bar_width = 136;
+    static const uint8_t bar_height = 8;    // Height at the low end of the bar
+    static const uint8_t axis_label_height = 14;
+    static const uint8_t axis_tick_height = 5;
+    static const float bar_x_2_term = 0.002; // x^2 term of parabola shape
+
+    uint8_t bar_marker_spacing = bar_width / 4;
+    uint8_t bar_marker_value = bar_max_speed / 4;
+    uint8_t bar_max_height = bar_height + bar_x_2_term * bar_width*bar_width;
+    uint8_t bar_filled_cnt;
+    uint8_t bar_line_h;
+    char axis_value[10];
+    uint8_t axis_text_y;
+
+    // Draw main speed value text
+    u8g2_SetFont(&u8g2, u8g2_font_logisoso38_tn);
+    if (speed < 10)
+        draw_string(x+22, y-55, "%1.2f", speed);
+    else if (speed < 100)
+        draw_string(x+22, y-55, "%2.1f", speed);
+    else
+        draw_string(x+22, y-55, "%3.0f", speed);
+
+    bar_filled_cnt = (bar_width * speed) / bar_max_speed;
+
+    // Draw speed bar frame lines
+    u8g2_DrawVLine(&u8g2, x, y-axis_label_height-bar_height, bar_height);    // Left edge
+    u8g2_DrawHLine(&u8g2, x, y-axis_label_height, bar_width);     // Bottom edge
+
+    u8g2_DrawVLine(&u8g2, x+bar_width, y-axis_label_height-bar_max_height, bar_max_height);  // Right edge
+
+    // Draw axis marker lines and label texts
+    u8g2_SetFont(&u8g2, u8g2_font_logisoso16_tr);
+    draw_string(x+15, y-axis_label_height-18, "kph");   // Speed unit
+
+    u8g2_SetFont(&u8g2, u8g2_font_t0_11_te);
+    axis_text_y = y - axis_label_height + axis_tick_height + 2 + u8g2_GetAscent(&u8g2);
+
+    // Left edge marker
+    u8g2_DrawVLine(&u8g2, x, y-axis_label_height, axis_tick_height);    
+    sprintf(axis_value, "%d", 0);
+    draw_string(x-u8g2_GetStrWidth(&u8g2, axis_value)/2, axis_text_y, axis_value);    
+
+    // 1/4 marker
+    u8g2_DrawVLine(&u8g2, x+bar_marker_spacing, y-axis_label_height, axis_tick_height); 
+    sprintf(axis_value, "%d", bar_marker_value);
+    draw_string(x+bar_marker_spacing-u8g2_GetStrWidth(&u8g2, axis_value)/2, axis_text_y, axis_value);
+
+    // 1/2 marker
+    u8g2_DrawVLine(&u8g2, x+2*bar_marker_spacing, y-axis_label_height, axis_tick_height); 
+    sprintf(axis_value, "%d", 2*bar_marker_value);
+    draw_string(x+2*bar_marker_spacing-u8g2_GetStrWidth(&u8g2, axis_value)/2, axis_text_y, axis_value);    
+
+    // 3/4 marker
+    u8g2_DrawVLine(&u8g2, x+3*bar_marker_spacing, y-axis_label_height, axis_tick_height); 
+    sprintf(axis_value, "%d", 3*bar_marker_value);
+    draw_string(x+3*bar_marker_spacing-u8g2_GetStrWidth(&u8g2, axis_value)/2, axis_text_y, axis_value);    
+
+    // Right edge marker
+    u8g2_DrawVLine(&u8g2, x+bar_width, y-axis_label_height, axis_tick_height); 
+    sprintf(axis_value, "%d", bar_max_speed);
+    draw_string(x+bar_width-u8g2_GetStrWidth(&u8g2, axis_value)/2, axis_text_y, axis_value);    
+
+    uint8_t draw_line = 1;
+
+    // Fill bar with vertical lines according to speed value
+    for (uint8_t bar_x = 0; bar_x < bar_filled_cnt; bar_x++)
+    {
+        if (draw_line = !draw_line)
+        {
+            bar_line_h = bar_height + bar_x*bar_x * bar_x_2_term;
+            u8g2_DrawVLine(&u8g2, x+bar_x, y-axis_label_height-bar_line_h, bar_line_h);
+        }
+    }
+}
+
+
 // 
 void page_controller::page_main_draw(void)
 {
     char print_buf[50];
-
     u8g2_ClearBuffer(&u8g2);
 
-    u8g2_SetFont(&u8g2, u8g2_font_logisoso38_tn);
-    u8g2_DrawStr(&u8g2, 80, 80, "120");
+    draw_speed_bar(60,127, 120);
     
-    u8g2_SetFont(&u8g2, u8g2_font_t0_11_te);
-    sprintf(print_buf, "VIN: %2.1f", esc_data.v_in);
-    u8g2_DrawStr(&u8g2, 0, 12, print_buf);
+    // u8g2_SetFont(&u8g2, u8g2_font_t0_11_te);
+    // sprintf(print_buf, "VIN: %2.1f", esc_data.v_in);
+    // u8g2_DrawStr(&u8g2, 0, 12, print_buf);
 
-    sprintf(print_buf, "ADC1: %1.2f, ADC2: %1.2f", esc_data.adc1_decoded, esc_data.adc2_decoded);
-    u8g2_DrawStr(&u8g2, 100, 12, print_buf);
+    // sprintf(print_buf, "ADC1: %1.2f, ADC2: %1.2f", esc_data.adc1_decoded, esc_data.adc2_decoded);
+    // u8g2_DrawStr(&u8g2, 100, 12, print_buf);
 
 
     u8g2_SendBuffer(&u8g2);

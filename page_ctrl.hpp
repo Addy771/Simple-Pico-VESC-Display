@@ -44,12 +44,6 @@ class moving_avg
         float prev_ratio;
 
     public:
-        // moving_avg(float new_ratio)
-        // {
-        //     data_val = 0;
-        //     prev_ratio = 1 - new_ratio;
-        // }
-        //moving_avg(float new_ratio) : data_val(), prev_ratio(1 - new_ratio) {} 
         moving_avg() : data_val(), prev_ratio(0.5), new_ratio(0.5) {}
 
         void set_ratio(float ratio)
@@ -97,6 +91,7 @@ class page_controller
         float wheel_diameter;
         uint8_t config_received;
         moving_avg<float> v_in_smoothed;
+        moving_avg<float> speed_smoothed;
 
 
         page_controller(void);
@@ -104,6 +99,7 @@ class page_controller
         void draw_page(void);
         void draw_string(uint16_t x_coord, uint16_t y_coord, const char* format, ...);
         void draw_overlay_status(void);
+        void draw_speed_bar(uint8_t x, uint8_t y, float speed);
         void update_load_outputs(void);
         void log_write_string(char *log_str);
 

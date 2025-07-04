@@ -52,7 +52,7 @@ UART0 RX | I2C0 SCL | SPI1 CSn | GP13 | 17│●              ●│24 | GP18   
 #define RTC_I2C_UNIT i2c0
 #define LOG_SAMPLE_RATE 10              // How often to sample data from VESC (in Hz)
 #define DISPLAY_BACKLIGHT_PWM_KHZ 10    // Backlight PWM dimming frequency
-#define SD_SPI_CLK_HZ 12.5 * 1000 * 1000
+#define SD_SPI_CLK_HZ 25 * 1000 * 1000
 #define BOOTLOADER_BUTTON_TIME_MS 2000  // Length of time in ms that L/R buttons must be held to enter bootloader mode
 #define BUTTON_LONG_PRESS_MS 500        // Length of time in ms a button must be held to be considered a long press
 #define COMM_MSG_TIMEOUT_MS 10          // Length of time in ms. If the ESC doesn't reply in this period, it's considered disconnected
