@@ -88,8 +88,8 @@ UART0 RX | I2C0 SCL | SPI1 CSn | GP13 | 17│●              ●│24 | GP18   
 #define SD_DETECT_GPIO 15
 
 // Pushbutton GPIO
-#define PB_LEFT_GPIO 1
-#define PB_RIGHT_GPIO 2
+#define PB_LEFT_GPIO 0
+#define PB_RIGHT_GPIO 1
 #define PB_CENTER_GPIO 22
 
 // External load control

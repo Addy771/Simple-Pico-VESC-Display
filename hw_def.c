@@ -78,8 +78,11 @@ void initialize_gpio(void)
     gpio_put(DEBUG_GPIO, 1);
 
     // Enable pushbutton pullups
+    gpio_init(PB_LEFT_GPIO);
     gpio_pull_up(PB_LEFT_GPIO);
+    gpio_init(PB_RIGHT_GPIO);
     gpio_pull_up(PB_RIGHT_GPIO);
+    gpio_init(PB_CENTER_GPIO);
     gpio_pull_up(PB_CENTER_GPIO);    
 
     cyw43_arch_gpio_put(CYW43_SMPS_PS_GPIO, 1);     // Enable PWM mode on DC/DC to reduce noise

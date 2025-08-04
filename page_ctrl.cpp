@@ -19,6 +19,7 @@ volatile extern uint8_t vesc_connected;
 
 page_controller::page_controller(void)
 {
+    absolute_time_t btn_init;
     mutex_init(&float_mutex);   // Only one core can use float ROM functions at a time
     mutex_init(&flash_mutex);   // Other core must halt when flash is being written
     
@@ -26,11 +27,14 @@ page_controller::page_controller(void)
     btn_gpio[PB_LEFT] = PB_LEFT_GPIO;
     btn_gpio[PB_RIGHT] = PB_RIGHT_GPIO;
     btn_gpio[PB_CONFIRM] = PB_CENTER_GPIO;
+    btn_init = get_absolute_time();
 
     for (uint8_t i = 0; i < BUTTON_COUNT; i++)
     {
-        btn_lockouts[i] = get_absolute_time();  // Initialize lockout timestamps with current time
+        btn_lockouts[i] = btn_init;  // Initialize lockout timestamps with current time
         btn_state[i] = gpio_get(btn_gpio[i]);
+        btn_held[i] = 0;
+        btn_pressed[i] = 0;
     }
 
     // External load control init
@@ -74,6 +78,8 @@ void page_controller::update(void)
     if ((speed_inc > 0 && speed_kph > 120) || (speed_inc < 0 && speed_kph <= 0))
         speed_inc = speed_inc * -1;
 
+    ////////////////////////////////////////////////////////////////
+
     // Handle load output tasks
     update_load_outputs();
 
@@ -81,19 +87,20 @@ void page_controller::update(void)
     btn_poll_time = get_absolute_time();    
     for (uint8_t i = 0; i < BUTTON_COUNT; i++)
     {
+
         btn_new_state[i] = gpio_get(btn_gpio[i]);
         btn_pressed[i] = 0; // Clear button presses before detecting them 
         
         // If state changed and button isn't locked out
-        if (btn_new_state[i] != btn_state[i] && absolute_time_diff_us(btn_poll_time, btn_lockouts[i]) > BUTTON_LOCK_TIME_MS*1000)
+        if ((btn_new_state[i] != btn_state[i]) && absolute_time_diff_us(btn_lockouts[i], btn_poll_time) > BUTTON_LOCK_TIME_MS*1000)
         {
             // Indicate button was pressed
             if (!btn_new_state[i] && btn_state[i])
                 btn_pressed[i] = 1;
             
-            btn_state[i] = btn_new_state[i];
             btn_lockouts[i] = btn_poll_time;
         }
+        btn_state[i] = btn_new_state[i];        
     }      
     
     // Check for bootloader button combo
@@ -101,8 +108,8 @@ void page_controller::update(void)
     (
         !btn_state[PB_LEFT] 
         && !btn_state[PB_RIGHT]
-        && absolute_time_diff_us(btn_poll_time, btn_lockouts[PB_LEFT]) > BOOTLOADER_BUTTON_TIME_MS*1000
-        && absolute_time_diff_us(btn_poll_time, btn_lockouts[PB_RIGHT]) > BOOTLOADER_BUTTON_TIME_MS*1000
+        && absolute_time_diff_us(btn_lockouts[PB_LEFT], btn_poll_time) > BOOTLOADER_BUTTON_TIME_MS*1000
+        && absolute_time_diff_us(btn_lockouts[PB_RIGHT], btn_poll_time) > BOOTLOADER_BUTTON_TIME_MS*1000
     )
     {
         // Inform user that bootloader mode is being entered
@@ -116,7 +123,8 @@ void page_controller::update(void)
         u8g2_ClearBuffer(&u8g2);
         u8g2_SetFont(&u8g2, u8g2_font_10x20_tf);    
         u8g2_DrawStr(&u8g2, 10, 64, "Bootloader Active");
-        u8g2_SendBuffer(&u8g2);        
+        u8g2_SendBuffer(&u8g2);   
+        sleep_ms(200);     
 
         reset_usb_boot(0,0);
     }
@@ -287,11 +295,14 @@ void page_controller::draw_speed_bar(uint8_t x, uint8_t y, float speed)
 
     uint8_t bar_marker_spacing = bar_width / 4;
     uint8_t bar_marker_value = bar_max_speed / 4;
-    uint8_t bar_max_height = bar_height + bar_x_2_term * bar_width*bar_width;
+    uint8_t bar_max_height;
     uint8_t bar_filled_cnt;
     uint8_t bar_line_h;
     char axis_value[10];
     uint8_t axis_text_y;
+
+    mutex_enter_blocking(&float_mutex);
+    bar_max_height = bar_height + bar_x_2_term * bar_width*bar_width;
 
     // Draw main speed value text
     u8g2_SetFont(&u8g2, u8g2_font_logisoso38_tn);
@@ -303,6 +314,15 @@ void page_controller::draw_speed_bar(uint8_t x, uint8_t y, float speed)
         draw_string(x+22, y-55, "%3.0f", speed);
 
     bar_filled_cnt = (bar_width * speed) / bar_max_speed;
+
+    // Fill bar with vertical lines according to speed value
+    for (uint8_t bar_x = 0; bar_x < bar_filled_cnt; bar_x += 2)
+    {
+        bar_line_h = bar_height + bar_x*bar_x * bar_x_2_term;
+        u8g2_DrawVLine(&u8g2, x+bar_x, y-axis_label_height-bar_line_h, bar_line_h);
+    }    
+    
+    mutex_exit(&float_mutex);
 
     // Draw speed bar frame lines
     u8g2_DrawVLine(&u8g2, x, y-axis_label_height-bar_height, bar_height);    // Left edge
@@ -342,17 +362,6 @@ void page_controller::draw_speed_bar(uint8_t x, uint8_t y, float speed)
     sprintf(axis_value, "%d", bar_max_speed);
     draw_string(x+bar_width-u8g2_GetStrWidth(&u8g2, axis_value)/2, axis_text_y, axis_value);    
 
-    uint8_t draw_line = 1;
-
-    // Fill bar with vertical lines according to speed value
-    for (uint8_t bar_x = 0; bar_x < bar_filled_cnt; bar_x++)
-    {
-        if (draw_line = !draw_line)
-        {
-            bar_line_h = bar_height + bar_x*bar_x * bar_x_2_term;
-            u8g2_DrawVLine(&u8g2, x+bar_x, y-axis_label_height-bar_line_h, bar_line_h);
-        }
-    }
 }
 
 
@@ -363,6 +372,28 @@ void page_controller::page_main_draw(void)
     u8g2_ClearBuffer(&u8g2);
 
     draw_speed_bar(60,127, 120);
+
+    draw_string(80, 10, "B_state: L=%1d  R=%1d, X=%1d", btn_state[PB_LEFT], btn_state[PB_RIGHT], btn_state[PB_CONFIRM]);
+    draw_string(80, 20, "B_press: L=%1d  R=%1d, X=%1d", btn_pressed[PB_LEFT], btn_pressed[PB_RIGHT], btn_pressed[PB_CONFIRM]);
+    draw_string(80, 30, "B_raw  : L=%1d  R=%1d, X=%1d", gpio_get(PB_LEFT_GPIO), gpio_get(PB_RIGHT_GPIO), gpio_get(PB_CENTER_GPIO));
+
+    draw_string(205, 50, "LOCKOUTS:");
+    draw_string(205, 60, "L=%lu", btn_lockouts[PB_LEFT]);
+    draw_string(205, 70, "R=%lu", btn_lockouts[PB_RIGHT]);
+    draw_string(205, 80, "X=%lu", btn_lockouts[PB_CONFIRM]);
+
+    ////////////////////////// BAR TESTS //////////////////////////
+    static bar_graph BT(&u8g2, 0, 120, 10, 60, /*min_val*/ 0, /*max_val*/ 100, BOTTOM_TO_TOP);    
+    static bar_graph TB(&u8g2, 30, 120, 10, 60, /*min_val*/ 0, /*max_val*/ 100, TOP_TO_BOTTOM); 
+    static bar_graph LR(&u8g2, 0, 10, 10, 60, /*min_val*/ 0, /*max_val*/ 100, LEFT_TO_RIGHT); 
+    static bar_graph RL(&u8g2, 0, 30, 10, 60, /*min_val*/ 0, /*max_val*/ 100, RIGHT_TO_LEFT); 
+
+    static uint8_t bar_val = 20;
+
+    BT.draw(bar_val);
+    TB.draw(bar_val);
+    LR.draw(bar_val);
+    RL.draw(bar_val);
     
     // u8g2_SetFont(&u8g2, u8g2_font_t0_11_te);
     // sprintf(print_buf, "VIN: %2.1f", esc_data.v_in);
