@@ -69,6 +69,7 @@ void page_controller::update(void)
 {
     uint8_t btn_new_state[BUTTON_COUNT];
     absolute_time_t btn_poll_time;
+    uint btn_time_diff;
 
     ///////////////////////////// TEST /////////////////////////////
     static uint8_t speed_kph = 0;
@@ -87,20 +88,27 @@ void page_controller::update(void)
     btn_poll_time = get_absolute_time();    
     for (uint8_t i = 0; i < BUTTON_COUNT; i++)
     {
-
+        btn_time_diff = absolute_time_diff_us(btn_lockouts[i], btn_poll_time);
         btn_new_state[i] = gpio_get(btn_gpio[i]);
         btn_pressed[i] = 0; // Clear button presses before detecting them 
         
         // If state changed and button isn't locked out
-        if ((btn_new_state[i] != btn_state[i]) && absolute_time_diff_us(btn_lockouts[i], btn_poll_time) > BUTTON_LOCK_TIME_MS*1000)
+        if ((btn_new_state[i] != btn_state[i]) && btn_time_diff > BUTTON_LOCK_TIME_MS*1000)
         {
             // Indicate button was pressed
             if (!btn_new_state[i] && btn_state[i])
                 btn_pressed[i] = 1;
             
             btn_lockouts[i] = btn_poll_time;
+            btn_time_diff = 0;  // Reset time difference since button was just pressed
         }
-        btn_state[i] = btn_new_state[i];        
+        btn_state[i] = btn_new_state[i];       
+        
+        // Check if button was held
+        if (btn_state[i] == 0 && btn_time_diff > BUTTON_LONG_PRESS_MS*1000)
+            btn_held[i] = 1;
+        else
+            btn_held[i] = 0;
     }      
     
     // Check for bootloader button combo
@@ -130,6 +138,11 @@ void page_controller::update(void)
     }
 
     // Switch pages
+    // If left PB is held and right PB is not, decrement page index if possible
+    if (page_idx > 0 && btn_held[PB_LEFT] && btn_state[PB_RIGHT])
+        page_idx--;
+    else if (page_idx < PAGE_COUNT-1 && btn_held[PB_RIGHT] && btn_state[PB_LEFT])
+        page_idx++;
 
     // Common calculations
     mutex_enter_blocking(&float_mutex);
@@ -375,7 +388,7 @@ void page_controller::page_main_draw(void)
 
     draw_string(80, 10, "B_state: L=%1d  R=%1d, X=%1d", btn_state[PB_LEFT], btn_state[PB_RIGHT], btn_state[PB_CONFIRM]);
     draw_string(80, 20, "B_press: L=%1d  R=%1d, X=%1d", btn_pressed[PB_LEFT], btn_pressed[PB_RIGHT], btn_pressed[PB_CONFIRM]);
-    draw_string(80, 30, "B_raw  : L=%1d  R=%1d, X=%1d", gpio_get(PB_LEFT_GPIO), gpio_get(PB_RIGHT_GPIO), gpio_get(PB_CENTER_GPIO));
+    draw_string(80, 30, "B_held : L=%1d  R=%1d, X=%1d", btn_held[PB_LEFT], btn_held[PB_RIGHT], btn_held[PB_CONFIRM]);
 
     draw_string(205, 50, "LOCKOUTS:");
     draw_string(205, 60, "L=%lu", btn_lockouts[PB_LEFT]);
