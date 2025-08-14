@@ -6,6 +6,7 @@
 #include "log.hpp"
 #include <cstdarg>
 #include <cstring>
+#include <cstdio>
 
 #ifndef PAGE_CTRL_H
 #define PAGE_CTRL_H
@@ -74,12 +75,12 @@ typedef enum
     TOP_TO_BOTTOM
 } bar_orientation;
 
-#define BAR_NAME_BUF 20
 #define BAR_UNITS_BUF 10
 
 class bar_graph
 {
     private:
+        u8g2_t *u8g2;    
         uint x;
         uint y;
         uint width;
@@ -87,10 +88,8 @@ class bar_graph
         int min_val;
         int max_val;
         uint8_t orientation;
-        u8g2_t *u8g2;
-        uint8_t use_labels;
-        char bar_name[BAR_NAME_BUF];
         char unit_str[BAR_UNITS_BUF];
+        u8g2_t *value_font;
 
     public:       
         bar_graph(u8g2_t *u8, uint origin_x, uint origin_y, uint bar_width, uint bar_height, int min_value, int max_value, bar_orientation bar_type) : 
@@ -102,12 +101,19 @@ class bar_graph
         min_val(min_value), 
         max_val(max_value), 
         orientation(bar_type),
-        use_labels(0) 
+        value_font(NULL) 
         {}
 
         void draw(int bar_value)
         {
             int filled_px = (height - 4) * bar_value / (max_val - min_val);
+            uint bar_center_x;
+            uint bar_center_y;
+            char text_buf[BAR_UNITS_BUF+10];
+
+            if (value_font != NULL)
+                u8g2_SetFont(u8g2, (uint8_t *)value_font);
+            u8g2_SetFontMode(u8g2, 1);      // Transparent mode
 
             // Draw outline using a frame
             // Draw filled portion using a solid box
@@ -117,42 +123,74 @@ class bar_graph
                 case LEFT_TO_RIGHT:
                     u8g2_DrawFrame(u8g2, x, y-width, height, width);
                     u8g2_DrawBox(u8g2, x+2, y+2-width, filled_px, width-4);
+                    if (value_font != NULL)
+                    {
+                        u8g2_SetDrawColor(u8g2, 2);     // XOR mode
+                        bar_center_x = x + height/2;
+                        bar_center_y = y - width/2;
+                        snprintf(text_buf, sizeof(text_buf), "%d", bar_value);
+
+                        u8g2_DrawStr(u8g2, bar_center_x-u8g2_GetStrWidth(u8g2, text_buf)/2, bar_center_y+u8g2_GetAscent(u8g2)/2, text_buf);
+                    }     
                     break;
 
                 case RIGHT_TO_LEFT:
                     u8g2_DrawFrame(u8g2, x, y-width, height, width);
                     u8g2_DrawBox(u8g2, x+2+(height-4-filled_px), y+2-width, filled_px, width-4);
+
+                    if (value_font != NULL)
+                    {
+                        u8g2_SetDrawColor(u8g2, 2);     // XOR mode
+                        bar_center_x = x + height/2;
+                        bar_center_y = y - width/2;
+                        snprintf(text_buf, sizeof(text_buf), "%d", bar_value);
+
+                        u8g2_DrawStr(u8g2, bar_center_x-u8g2_GetStrWidth(u8g2, text_buf)/2, bar_center_y+u8g2_GetAscent(u8g2)/2, text_buf);
+                    }                    
                     break;   
                     
                 case BOTTOM_TO_TOP:
                     u8g2_DrawFrame(u8g2, x, y-height, width, height);
                     u8g2_DrawBox(u8g2, x+2, y-2-filled_px, width-4, filled_px);
+
+                    if (value_font != NULL)
+                    {
+                        u8g2_SetDrawColor(u8g2, 2);     // XOR mode
+                        bar_center_x = x + width/2;
+                        bar_center_y = y - height/2;
+                        snprintf(text_buf, sizeof(text_buf), "%d", bar_value);
+
+                        u8g2_DrawStr(u8g2, bar_center_x-u8g2_GetStrWidth(u8g2, text_buf)/2, bar_center_y+u8g2_GetAscent(u8g2)/2, text_buf);
+                    }
                     break;                
 
                 case TOP_TO_BOTTOM:
                     u8g2_DrawFrame(u8g2, x, y-height, width, height);
                     u8g2_DrawBox(u8g2, x+2, y-height+2, width-4, filled_px);
+
+                    if (value_font != NULL)
+                    {
+                        u8g2_SetDrawColor(u8g2, 2);     // XOR mode
+                        bar_center_x = x + width/2;
+                        bar_center_y = y - height/2;
+
+                        snprintf(text_buf, sizeof(text_buf), "%d", bar_value);
+                        u8g2_DrawStr(u8g2, bar_center_x-u8g2_GetStrWidth(u8g2, text_buf)/2, bar_center_y+u8g2_GetAscent(u8g2)/2, text_buf);
+                    }                    
                     break;                        
             }
+
+            u8g2_SetDrawColor(u8g2, 1);     // Normal mode
+            u8g2_SetFontMode(u8g2, 0);      // Solid mode
         }
 
 
-        // Set the strings to use for labeling the bar graph and the font to use.
-        // The font must be a transparent type (name ends in _tx)
-        void set_text(const uint8_t *u8_font, const char *name, const char *units)
+        // Set the string to use for the unit display
+        // The font must be a transparent type (name ends in _tx)        
+        void set_font(const uint8_t *u8_font)
         {
-            uint8_t length;
-            use_labels = 1;
-
-            // Only copy the strings if they will fit in the buffers
-            if (strlen(name) <= BAR_NAME_BUF)
-                strcpy(bar_name, name);
-
-            if (strlen(units) <= BAR_UNITS_BUF)
-                strcpy(unit_str, units);
-
+            value_font = (u8g2_t *) u8_font;
         }
-
 };
 
 
@@ -199,5 +237,8 @@ class page_controller
         void page_main_draw(void);
         void page_log_draw(void);
 };
+
+
+void format_with_si(float value, char *out_buf, size_t buf_len, const char *unit);
 
 #endif

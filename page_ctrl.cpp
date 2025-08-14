@@ -7,6 +7,7 @@
 #include "nv_flash.hpp"
 #include "log.hpp"
 #include <cstdarg>
+#include <math.h>
 
 #include "bitmap/sd_ok.xbm"
 #include "bitmap/sd_err.xbm"
@@ -16,6 +17,28 @@
 
 
 volatile extern uint8_t vesc_connected;
+
+
+// Scale value and add SI prefixes to keep length of number printout short
+void format_with_si(float value, char *out_buf, size_t buf_len, const char *unit)
+{
+    static const char* si_prefixes[] = {"u", "m", "", "k", "M"};
+    int8_t exp = 0;
+
+    // multiply or divide value as necessary until it's between 1.0 and 1000.0
+    while (fabs(value) >= 1000.0 && exp < 2)
+    {
+        value /= 1000.0;
+        exp++;
+    }
+    while (fabs(value) <= 1.0 && exp > -2)
+    {
+        value *= 1000.0;
+        exp--;
+    }
+
+    snprintf(out_buf, buf_len, "%.1f%s%s", value, si_prefixes[exp + 2], unit);
+}
 
 page_controller::page_controller(void)
 {
@@ -228,7 +251,7 @@ void page_controller::draw_page(void)
 // Draw a string with sprintf 
 void page_controller::draw_string(uint16_t x_coord, uint16_t y_coord, const char* format, ...)
 {
-    static char string_buf[100];
+    char string_buf[100];
     va_list args;
     va_start(args, format);
 
@@ -300,7 +323,7 @@ void page_controller::draw_overlay_status(void)
 void page_controller::draw_speed_bar(uint8_t x, uint8_t y, float speed)
 {
     static const uint bar_max_speed = nv_settings.data.speed_bar_max;
-    static const uint8_t bar_width = 136;
+    static const uint8_t bar_width = 120;   // 136
     static const uint8_t bar_height = 8;    // Height at the low end of the bar
     static const uint8_t axis_label_height = 14;
     static const uint8_t axis_tick_height = 5;
@@ -381,39 +404,86 @@ void page_controller::draw_speed_bar(uint8_t x, uint8_t y, float speed)
 // 
 void page_controller::page_main_draw(void)
 {
-    char print_buf[50];
+    static char print_buf[30];
+
     u8g2_ClearBuffer(&u8g2);
 
-    draw_speed_bar(60,127, 120);
+    draw_speed_bar(68, 103, 120);
 
-    draw_string(80, 10, "B_state: L=%1d  R=%1d, X=%1d", btn_state[PB_LEFT], btn_state[PB_RIGHT], btn_state[PB_CONFIRM]);
-    draw_string(80, 20, "B_press: L=%1d  R=%1d, X=%1d", btn_pressed[PB_LEFT], btn_pressed[PB_RIGHT], btn_pressed[PB_CONFIRM]);
-    draw_string(80, 30, "B_held : L=%1d  R=%1d, X=%1d", btn_held[PB_LEFT], btn_held[PB_RIGHT], btn_held[PB_CONFIRM]);
+    const uint8_t side_bar_y = 27;
 
-    draw_string(205, 50, "LOCKOUTS:");
-    draw_string(205, 60, "L=%lu", btn_lockouts[PB_LEFT]);
-    draw_string(205, 70, "R=%lu", btn_lockouts[PB_RIGHT]);
-    draw_string(205, 80, "X=%lu", btn_lockouts[PB_CONFIRM]);
+    // Temperature bars
+    static bar_graph FET_temp(&u8g2, 210, side_bar_y, 16, 46, 0, 120, RIGHT_TO_LEFT);
+    static bar_graph MTR_temp(&u8g2, 210, side_bar_y+19, 16, 46, 0, 120, RIGHT_TO_LEFT);
 
-    ////////////////////////// BAR TESTS //////////////////////////
-    static bar_graph BT(&u8g2, 0, 120, 10, 60, /*min_val*/ 0, /*max_val*/ 100, BOTTOM_TO_TOP);    
-    static bar_graph TB(&u8g2, 30, 120, 10, 60, /*min_val*/ 0, /*max_val*/ 100, TOP_TO_BOTTOM); 
-    static bar_graph LR(&u8g2, 0, 10, 10, 60, /*min_val*/ 0, /*max_val*/ 100, LEFT_TO_RIGHT); 
-    static bar_graph RL(&u8g2, 0, 30, 10, 60, /*min_val*/ 0, /*max_val*/ 100, RIGHT_TO_LEFT); 
-
-    static uint8_t bar_val = 20;
-
-    BT.draw(bar_val);
-    TB.draw(bar_val);
-    LR.draw(bar_val);
-    RL.draw(bar_val);
+    FET_temp.set_font(u8g2_font_t0_11_te);
+    MTR_temp.set_font(u8g2_font_t0_11_te);
     
-    // u8g2_SetFont(&u8g2, u8g2_font_t0_11_te);
-    // sprintf(print_buf, "VIN: %2.1f", esc_data.v_in);
-    // u8g2_DrawStr(&u8g2, 0, 12, print_buf);
+    // Temperature labels
+    u8g2_SetFont(&u8g2, u8g2_font_helvR08_tf);
+    draw_string(210, side_bar_y-19, "Temps \xB0" "C");
+    draw_string(190, side_bar_y-4, "FET");
+    draw_string(188, side_bar_y+15, "MTR");
 
-    // sprintf(print_buf, "ADC1: %1.2f, ADC2: %1.2f", esc_data.adc1_decoded, esc_data.adc2_decoded);
-    // u8g2_DrawStr(&u8g2, 100, 12, print_buf);
+    FET_temp.draw(25);
+    MTR_temp.draw(55);
+
+    // Motor current bar
+    static bar_graph MTR_current(&u8g2, 0, side_bar_y, 16, 60, 0,  120, LEFT_TO_RIGHT);
+    MTR_current.set_font(u8g2_font_t0_11_te);
+
+    // Motor current label
+    u8g2_SetFont(&u8g2, u8g2_font_helvR08_tf);
+    draw_string(0, side_bar_y-19, "Motor Amps");
+
+    MTR_current.draw(90);
+
+    // Battery level bar
+    static bar_graph batt_level(&u8g2, 0, side_bar_y+30, 16, 60, 0, 100, LEFT_TO_RIGHT);
+    batt_level.set_font(u8g2_font_t0_11_te);
+
+    // Battery level label
+    u8g2_SetFont(&u8g2, u8g2_font_helvR08_tf);    
+    draw_string(0, side_bar_y+11, "Battery (%%)");
+    // draw_string(0, side_bar_y+52, "30A");
+
+    batt_level.draw(80);
+    u8g2_DrawFrame(&u8g2, 59, side_bar_y+17, 5, 10);    // Button-tip to make bar look like a battery 
+
+    // Power bar
+    const uint8_t pwr_bar_h = 20;
+
+    static bar_graph pwr_bar_neg(&u8g2, 0, 127, pwr_bar_h, 128, 0, 5000, RIGHT_TO_LEFT);
+    static bar_graph pwr_bar_pos(&u8g2, 127, 127, pwr_bar_h, 127, 0, 5000, LEFT_TO_RIGHT);
+
+    pwr_bar_neg.draw(0);
+    pwr_bar_pos.draw(2400);
+
+    // Text values
+    // Battery power
+    u8g2_SetFont(&u8g2, u8g2_font_helvB12_tf);   
+
+    format_with_si(63.8, print_buf, sizeof(print_buf), "V");
+    draw_string(0, side_bar_y+46, print_buf);
+
+    format_with_si(0.2, print_buf, sizeof(print_buf), "A");
+    draw_string(0, side_bar_y+62, print_buf);
+
+    format_with_si(2431.1, print_buf, sizeof(print_buf), "W");
+    draw_string(0, side_bar_y+78, print_buf);
+
+    // Odometer related
+    u8g2_SetFont(&u8g2, u8g2_font_helvR08_tf);    
+    draw_string(193, side_bar_y+30, "Trip A | B");
+    draw_string(193, side_bar_y+44, "1337  1337");
+    draw_string(193, side_bar_y+58, "Odo: 4010");
+    draw_string(204, side_bar_y+72, "km");
+
+    // Status / Error icons
+    // SD card?
+    // Wifi?
+    // ESC communication
+    // Load outputs?
 
 
     u8g2_SendBuffer(&u8g2);
