@@ -49,6 +49,7 @@ typedef struct
     float amp_hours_charged;
     float watt_hours;
     float watt_hours_charged;
+    float battery_level;
     int tachometer;
     int tachometer_abs;
     float position;

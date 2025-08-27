@@ -7,6 +7,7 @@
 #include <cstdarg>
 #include <cstring>
 #include <cstdio>
+#include <math.h>
 
 #ifndef PAGE_CTRL_H
 #define PAGE_CTRL_H
@@ -106,7 +107,7 @@ class bar_graph
 
         void draw(int bar_value)
         {
-            int filled_px = (height - 4) * bar_value / (max_val - min_val);
+            int filled_px = std::min((height - 4) * bar_value / (max_val - min_val), height - 4);
             uint bar_center_x;
             uint bar_center_y;
             char text_buf[BAR_UNITS_BUF+10];
@@ -228,10 +229,13 @@ class page_controller
         void update(void);
         void draw_page(void);
         void draw_string(uint16_t x_coord, uint16_t y_coord, const char* format, ...);
+        void draw_SD_icon(uint16_t x_coord, uint16_t y_coord);
+        void draw_ESC_icon(uint16_t x_coord, uint16_t y_coord);
         void draw_overlay_status(void);
         void draw_speed_bar(uint8_t x, uint8_t y, float speed);
         void update_load_outputs(void);
         void log_write_string(char *log_str);
+        inline float calc_speed_kph();
 
         // page functions
         void page_main_draw(void);

@@ -733,14 +733,24 @@ void core1_entry()
             next_sample = delayed_by_ms(next_sample, 1000 / LOG_SAMPLE_RATE);        
 
             memset(request_msg.msg, 0, 6); 
+
+            // Main data polling
             request_msg.msg[0] = COMM_GET_VALUES;
             request_msg.length = 1;
             comm_request_buf.push(request_msg);
 
+            // Throttle + regen input values
             request_msg.msg[0] = COMM_GET_DECODED_ADC;
             request_msg.length = 1;
             comm_request_buf.push(request_msg);
-            
+
+            // Battery level
+            int32_t idx = 1;
+            request_msg.msg[0] = COMM_GET_VALUES_SETUP_SELECTIVE;
+             // battery_level (1 << 8)
+            buffer_append_uint32(request_msg.msg, (1 << 8), &idx);
+            request_msg.length = 5;
+            comm_request_buf.push(request_msg);
         }
 
         // Handle CAN messages if CAN mode is enabled
@@ -979,8 +989,6 @@ void process_data(uint8_t *data, size_t len)
             adc_v2 = buffer_get_float32(data, 1e6, &idx);
             mutex_exit(float_mutex);
 
-            // This is the last request packet response, so now we can save the data to the log file
-            do_logging = 1;
             break;
 
         case COMM_GET_MCCONF_TEMP:
@@ -998,10 +1006,18 @@ void process_data(uint8_t *data, size_t len)
             mutex_exit(float_mutex);            
             break;
 
-        case COMM_GET_VALUES_SETUP:
+        case COMM_GET_VALUES_SETUP_SELECTIVE:
             vesc_connected = 1;
 
+            // Selection mask
+            idx += 4;
+            mutex_enter_blocking(float_mutex);   
+            data_pt->battery_level = std::max(0.0f, buffer_get_float16(data, 1e1, &idx));   // Scale to 100 max with 0 as minimum value
 
+            //DBG_PRINT("battery_level=%f\n", data_pt->battery_level);
+            mutex_exit(float_mutex);  
+            // This is the last request packet response, so now we can save the data to the log file
+            do_logging = 1;            
             break;
 
     }

@@ -14,6 +14,8 @@
 #include "bitmap/sd_none.xbm"
 #include "bitmap/batt_frame.xbm"
 #include "bitmap/batt_unknown.xbm"
+#include "bitmap/esc_connected.xbm"
+#include "bitmap/esc_disconnected.xbm"
 
 
 volatile extern uint8_t vesc_connected;
@@ -38,6 +40,21 @@ void format_with_si(float value, char *out_buf, size_t buf_len, const char *unit
     }
 
     snprintf(out_buf, buf_len, "%.1f%s%s", value, si_prefixes[exp + 2], unit);
+}
+
+// Compute speed using data and config values from ESC
+inline float page_controller::calc_speed_kph()
+{
+    if (motor_poles <= 0 || wheel_diameter <= 0.0f || config_received == 0) return 0.0f;
+
+    uint8_t pole_pairs = motor_poles / 2;
+    float circumference = wheel_diameter * M_PI;
+    float mech_rpm = static_cast<float>(esc_data.rpm) / pole_pairs;
+    float mech_rps = mech_rpm / 60.0f;
+    float speed_m_per_s = mech_rps * circumference;
+    float speed_kph = speed_m_per_s * 3.6f; // speed_m_per_s * 3600 seconds / 1000m
+    return speed_kph;
+
 }
 
 page_controller::page_controller(void)
@@ -79,10 +96,15 @@ page_controller::page_controller(void)
     u8log_Init(&u8log, U8LOG_WIDTH, U8LOG_HEIGHT, u8log_buf);
     mutex_init(&log_mutex);
 
+    // Initialize config with reasonable values
     config_received = 0;
+    motor_poles = 46;
+    wheel_diameter = 0.66;
+
+    esc_data.battery_level = 0.0;
 
     // Set ratio of weighted moving averages
-    v_in_smoothed.set_ratio(0.3);
+    v_in_smoothed.set_ratio(0.7);
     speed_smoothed.set_ratio(0.3);
 }
 
@@ -93,16 +115,8 @@ void page_controller::update(void)
     uint8_t btn_new_state[BUTTON_COUNT];
     absolute_time_t btn_poll_time;
     uint btn_time_diff;
+    float raw_speed_kph;
 
-    ///////////////////////////// TEST /////////////////////////////
-    static uint8_t speed_kph = 0;
-    static int8_t speed_inc = 1;    
-    speed_kph += speed_inc;
-
-    if ((speed_inc > 0 && speed_kph > 120) || (speed_inc < 0 && speed_kph <= 0))
-        speed_inc = speed_inc * -1;
-
-    ////////////////////////////////////////////////////////////////
 
     // Handle load output tasks
     update_load_outputs();
@@ -172,7 +186,11 @@ void page_controller::update(void)
 
     v_in_smoothed.update(esc_data.v_in);
 
-    speed_smoothed.update(speed_kph);
+    raw_speed_kph = calc_speed_kph();
+
+    speed_smoothed.update(raw_speed_kph);
+    //speed_smoothed.update(120.0);
+
 
     //     // Update rolling averages
     //     b_cur_avg = (1 - ROLLING_AVG_RATIO) * b_cur_avg + ROLLING_AVG_RATIO * data_pt.current_in;
@@ -260,6 +278,41 @@ void page_controller::draw_string(uint16_t x_coord, uint16_t y_coord, const char
 }
 
 
+// Draw the appropriate icon representing the status of the SD card
+void page_controller::draw_SD_icon(uint16_t x_coord, uint16_t y_coord)
+{
+    switch (sd_status)
+    {
+        case SD_PRESENT:
+            u8g2_DrawXBMP(&u8g2, x_coord, y_coord, sd_ok_width, sd_ok_height, sd_ok_bits);
+            break;
+
+        case SD_NOT_PRESENT:
+            u8g2_DrawXBMP(&u8g2, x_coord, y_coord, sd_none_width, sd_none_height, sd_none_bits);
+            break;
+
+        case SD_ERROR:
+            u8g2_DrawXBMP(&u8g2, x_coord, y_coord, sd_err_width, sd_err_height, sd_err_bits);
+            break;
+
+    }    
+}
+
+
+// Draw the appropriate icon representing the status of the connection to the ESC
+void page_controller::draw_ESC_icon(uint16_t x_coord, uint16_t y_coord)
+{
+    if (vesc_connected)
+    {
+        u8g2_DrawXBMP(&u8g2, x_coord, y_coord, esc_connected_width, esc_connected_height, esc_connected_bits);
+    }
+    else
+    {
+        u8g2_DrawXBMP(&u8g2, x_coord, y_coord, esc_disconnected_width, esc_disconnected_height, esc_disconnected_bits);
+    }
+}
+
+
 // Status overlay, covers top area of screen
 void page_controller::draw_overlay_status(void)
 {
@@ -282,21 +335,7 @@ void page_controller::draw_overlay_status(void)
     }
 
     // SD card working?
-    switch (sd_status)
-    {
-        case SD_PRESENT:
-            u8g2_DrawXBMP(&u8g2, 170, 0, sd_ok_width, sd_ok_height, sd_ok_bits);
-            break;
-
-        case SD_NOT_PRESENT:
-            u8g2_DrawXBMP(&u8g2, 170, 0, sd_none_width, sd_none_height, sd_none_bits);
-            break;
-
-        case SD_ERROR:
-            u8g2_DrawXBMP(&u8g2, 170, 0, sd_err_width, sd_err_height, sd_err_bits);
-            break;
-
-    }
+    draw_SD_icon(170, 0);
 
 
     // Wifi status?
@@ -405,10 +444,11 @@ void page_controller::draw_speed_bar(uint8_t x, uint8_t y, float speed)
 void page_controller::page_main_draw(void)
 {
     static char print_buf[30];
+    datetime_t rtc_time;
 
     u8g2_ClearBuffer(&u8g2);
 
-    draw_speed_bar(68, 103, 120);
+    draw_speed_bar(67, 112, speed_smoothed.get_value());
 
     const uint8_t side_bar_y = 27;
 
@@ -425,8 +465,8 @@ void page_controller::page_main_draw(void)
     draw_string(190, side_bar_y-4, "FET");
     draw_string(188, side_bar_y+15, "MTR");
 
-    FET_temp.draw(25);
-    MTR_temp.draw(55);
+    FET_temp.draw(esc_data.temp_mos);
+    MTR_temp.draw(esc_data.temp_motor);
 
     // Motor current bar
     static bar_graph MTR_current(&u8g2, 0, side_bar_y, 16, 60, 0,  120, LEFT_TO_RIGHT);
@@ -436,7 +476,7 @@ void page_controller::page_main_draw(void)
     u8g2_SetFont(&u8g2, u8g2_font_helvR08_tf);
     draw_string(0, side_bar_y-19, "Motor Amps");
 
-    MTR_current.draw(90);
+    MTR_current.draw(esc_data.current_motor);
 
     // Battery level bar
     static bar_graph batt_level(&u8g2, 0, side_bar_y+30, 16, 60, 0, 100, LEFT_TO_RIGHT);
@@ -445,45 +485,64 @@ void page_controller::page_main_draw(void)
     // Battery level label
     u8g2_SetFont(&u8g2, u8g2_font_helvR08_tf);    
     draw_string(0, side_bar_y+11, "Battery (%%)");
-    // draw_string(0, side_bar_y+52, "30A");
 
-    batt_level.draw(80);
+    batt_level.draw(esc_data.battery_level);
     u8g2_DrawFrame(&u8g2, 59, side_bar_y+17, 5, 10);    // Button-tip to make bar look like a battery 
 
     // Power bar
-    const uint8_t pwr_bar_h = 20;
+    const uint8_t pwr_bar_h = 12;
 
     static bar_graph pwr_bar_neg(&u8g2, 0, 127, pwr_bar_h, 128, 0, 5000, RIGHT_TO_LEFT);
     static bar_graph pwr_bar_pos(&u8g2, 127, 127, pwr_bar_h, 127, 0, 5000, LEFT_TO_RIGHT);
 
-    pwr_bar_neg.draw(0);
-    pwr_bar_pos.draw(2400);
+    if (esc_data.p_in >= 0)
+    {
+        pwr_bar_neg.draw(0);
+        pwr_bar_pos.draw(esc_data.p_in);
+    }
+    else
+    {
+        pwr_bar_neg.draw(fabs(esc_data.p_in));
+        pwr_bar_pos.draw(0);        
+    }
+
 
     // Text values
     // Battery power
-    u8g2_SetFont(&u8g2, u8g2_font_helvB12_tf);   
+    u8g2_SetFont(&u8g2, u8g2_font_helvB10_tf);   
 
-    format_with_si(63.8, print_buf, sizeof(print_buf), "V");
+    //format_with_si(esc_data.v_in, print_buf, sizeof(print_buf), "V");
+    format_with_si(v_in_smoothed.get_value(), print_buf, sizeof(print_buf), "V");
     draw_string(0, side_bar_y+46, print_buf);
 
-    format_with_si(0.2, print_buf, sizeof(print_buf), "A");
-    draw_string(0, side_bar_y+62, print_buf);
+    format_with_si(esc_data.current_in, print_buf, sizeof(print_buf), "A");
+    draw_string(0, side_bar_y+64, print_buf);
 
-    format_with_si(2431.1, print_buf, sizeof(print_buf), "W");
-    draw_string(0, side_bar_y+78, print_buf);
+    format_with_si(esc_data.p_in, print_buf, sizeof(print_buf), "W");
+    draw_string(0, side_bar_y+82, print_buf);
 
     // Odometer related
+    uint8_t odo_start_x = 195;
     u8g2_SetFont(&u8g2, u8g2_font_helvR08_tf);    
-    draw_string(193, side_bar_y+30, "Trip A | B");
-    draw_string(193, side_bar_y+44, "1337  1337");
-    draw_string(193, side_bar_y+58, "Odo: 4010");
-    draw_string(204, side_bar_y+72, "km");
+    // draw_string(odo_start_x, side_bar_y+30, "Trip A | B");
+    // draw_string(odo_start_x, side_bar_y+44, "1337  1337");
+    draw_string(odo_start_x, side_bar_y+30, "Trip A: 1337");
+    draw_string(odo_start_x, side_bar_y+44, "Trip B: 1337");    
+    draw_string(odo_start_x, side_bar_y+58, "Odo: %.1f", esc_data.odometer);
+    draw_string(odo_start_x+10, side_bar_y+72, "(km)");
 
     // Status / Error icons
-    // SD card?
+    draw_SD_icon(70, 1);
+    draw_ESC_icon(87, 0);
     // Wifi?
-    // ESC communication
     // Load outputs?
+
+    if (rtc_connected)
+    {
+        rtc_get_datetime(&rtc_time);
+        u8g2_SetFont(&u8g2, u8g2_font_t0_11_te);      
+        draw_string(113, 9, "%02d:%02d", rtc_time.hour, rtc_time.min);
+    }
 
 
     u8g2_SendBuffer(&u8g2);
