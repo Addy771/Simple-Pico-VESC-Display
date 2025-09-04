@@ -87,6 +87,8 @@ page_controller::page_controller(void)
     load_mode[LOAD_A] = nv_settings.data.load_modes & 0x0F;         // Lower nibble has A channel mode
     load_mode[LOAD_B] = (nv_settings.data.load_modes & 0xF0) >> 4;  // Upper nibble has B channel mode
 
+    esc_data.odometer = nv_settings.data.odometer;  // Copy odometer value from flash storage
+
     // Add page functions to list
     page_fn[0] = (page_draw_fn) &page_controller::page_main_draw;
     page_fn[1] = (page_draw_fn) &page_controller::page_log_draw;
@@ -116,7 +118,6 @@ void page_controller::update(void)
     absolute_time_t btn_poll_time;
     uint btn_time_diff;
     float raw_speed_kph;
-
 
     // Handle load output tasks
     update_load_outputs();
@@ -187,40 +188,45 @@ void page_controller::update(void)
     v_in_smoothed.update(esc_data.v_in);
 
     raw_speed_kph = calc_speed_kph();
-
     speed_smoothed.update(raw_speed_kph);
-    //speed_smoothed.update(120.0);
+
+    static absolute_time_t last_odometer_count = get_absolute_time();
+    absolute_time_t current_time = get_absolute_time();
+
+    // Odometer calculation
+    // Distance = avg Speed * time
+    int64_t time_between_odometer_check_ms = absolute_time_diff_us(last_odometer_count, current_time)/1000;
+
+    static float prev_kph_for_odometer = 0;
+    float average_speed = (abs(raw_speed_kph) + prev_kph_for_odometer)/2;
+    float time_hours = time_between_odometer_check_ms / (3600.0 * 1000.0);   // /3600.0/1000.0; // convert kph * ms to km (odo)
+    float distance_travelled = average_speed * time_hours;
+    esc_data.odometer += distance_travelled;
+    nv_settings.data.trip_a += distance_travelled;
+    nv_settings.data.trip_b += distance_travelled;
+    prev_kph_for_odometer = raw_speed_kph;
+    last_odometer_count = current_time;
+
+    // Decide when odometer and trip counts need to be saved
+    static absolute_time_t last_odometer_store_time = get_absolute_time();
+    static float last_odometer_store_value = esc_data.odometer;
+
+    if ((absolute_time_diff_us(last_odometer_store_time, current_time)/1e6) >= ODOMETER_WRITE_INTERVAL_S \
+    && (esc_data.odometer - last_odometer_store_value) >= (ODOMETER_WRITE_DISTANCE_M / 1000.0f))
+    {
+        nv_settings.data.odometer = esc_data.odometer;
+        last_odometer_store_value = esc_data.odometer;
+        mutex_exit(&float_mutex);   // Release float lock in case other core is waiting for it
+        last_odometer_store_time = current_time;
+
+        // flash mutex will be entered
+        nv_settings.store_data();
+
+        DBG_PRINT("Stored odometer value: %.1f km at page %d, block %d\n", esc_data.odometer, nv_settings.page_id, nv_settings.block_id);
+        mutex_enter_blocking(&float_mutex);
+    }
 
 
-    //     // Update rolling averages
-    //     b_cur_avg = (1 - ROLLING_AVG_RATIO) * b_cur_avg + ROLLING_AVG_RATIO * data_pt.current_in;
-    //     b_volts_avg = (1 - ROLLING_AVG_RATIO) * b_volts_avg + ROLLING_AVG_RATIO * data_pt.v_in;
-
-    //     // for now hardcode 13S battery Full =54.6V empty = 39V (3.0/cell) (delta V = 15.6)
-    //     b_soc = MIN(((b_volts_avg - 39.0) * 100 / 15.6), 100); // Get scale from min to max batt V
-    // Other calculations 
-    // Speed calculation
-    // core 1 should be doing speed calculations
-    // // KPH = ERPM / Pole Pairs * wheel diameter(mm)/1000000 * PI * 60 min/hour
-    // kph = float(m_erpm_avg/23 * 660/1000000 * 3.1415 * 60);
-
-    // // Odometer calculation
-    // // Distance = avg Speed * time
-    // static float average_speed = 0;
-    // static float time_hours = 0;
-    // static float distance_travelled = 0;
-    // // if time has been at least ODOMETER_UPDATE_INTERVAL_MS, calculate distance traveled and add to odometer
-    // time_between_odometer_check_ms = absolute_time_diff_us(last_odometer_count,current_time_ms)/1000;
-
-    // if (time_between_odometer_check_ms >= ODOMETER_UPDATE_INTERVAL_MS)
-    // {
-    //     average_speed = abs((kph + prev_kph_for_odometer))/2;
-    //     time_hours = time_between_odometer_check_ms/3600.0/1000.0;// convert kph * ms to km (odo)
-    //     distance_travelled = average_speed * time_hours;
-    //     odometer += distance_travelled;
-    //     prev_kph_for_odometer = kph;
-    //     last_odometer_count = current_time_ms;
-    // }  
     mutex_exit(&float_mutex);     
 }
 
@@ -346,9 +352,13 @@ void page_controller::draw_overlay_status(void)
         u8g2_DrawXBMP(&u8g2, 0, 0, batt_frame_width, batt_frame_height, batt_frame_bits);
         // Fill bar according to battery level
 
+
         mutex_enter_blocking(&float_mutex);
+        uint filled_px = 20 * esc_data.battery_level / 100;        
         draw_string(30, 9, "%3.1fV", v_in_smoothed.get_value());
         mutex_exit(&float_mutex);
+
+        u8g2_DrawBox(&u8g2, 2, 2, filled_px, batt_frame_height-4);
     }
     else
     {
@@ -377,6 +387,7 @@ void page_controller::draw_speed_bar(uint8_t x, uint8_t y, float speed)
     uint8_t axis_text_y;
 
     mutex_enter_blocking(&float_mutex);
+    speed = fabs(speed);
     bar_max_height = bar_height + bar_x_2_term * bar_width*bar_width;
 
     // Draw main speed value text
@@ -476,7 +487,7 @@ void page_controller::page_main_draw(void)
     u8g2_SetFont(&u8g2, u8g2_font_helvR08_tf);
     draw_string(0, side_bar_y-19, "Motor Amps");
 
-    MTR_current.draw(esc_data.current_motor);
+    MTR_current.draw(fabs(esc_data.current_motor));
 
     // Battery level bar
     static bar_graph batt_level(&u8g2, 0, side_bar_y+30, 16, 60, 0, 100, LEFT_TO_RIGHT);
@@ -522,12 +533,12 @@ void page_controller::page_main_draw(void)
     draw_string(0, side_bar_y+82, print_buf);
 
     // Odometer related
-    uint8_t odo_start_x = 195;
+    uint8_t odo_start_x = 192;
     u8g2_SetFont(&u8g2, u8g2_font_helvR08_tf);    
     // draw_string(odo_start_x, side_bar_y+30, "Trip A | B");
     // draw_string(odo_start_x, side_bar_y+44, "1337  1337");
-    draw_string(odo_start_x, side_bar_y+30, "Trip A: 1337");
-    draw_string(odo_start_x, side_bar_y+44, "Trip B: 1337");    
+    draw_string(odo_start_x, side_bar_y+30, "Trip A: %.1f", nv_settings.data.trip_a);
+    draw_string(odo_start_x, side_bar_y+44, "Trip B: %.1f", nv_settings.data.trip_b);    
     draw_string(odo_start_x, side_bar_y+58, "Odo: %.1f", esc_data.odometer);
     draw_string(odo_start_x+10, side_bar_y+72, "(km)");
 

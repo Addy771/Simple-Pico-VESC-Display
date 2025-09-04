@@ -15,12 +15,14 @@
 
 typedef struct 
 {
-    uint8_t write_mark = WRITE_MARKER;
+    uint8_t write_mark = WRITE_MARKER;      // KEEP IN FRONT
     uint8_t disp_brightness = 0;
-    uint32_t log_num = 0;
-    float odometer = 0.0;
     uint8_t load_modes = 0;
     uint8_t flags = 0;
+    uint32_t log_num = 0;
+    float odometer = 0.0f;    
+    float trip_a = 0.0f;
+    float trip_b = 0.0f;
     uint8_t user_vesc_can_id = 0;
     uint8_t user_disp_can_id = 0;
     uint8_t speed_bar_max = 120;

@@ -20,7 +20,7 @@
 
 #define U8LOG_WIDTH 42
 #define U8LOG_HEIGHT 11
-#define STATUS_HEIGHT 11
+#define STATUS_HEIGHT 12
 
 typedef void (*page_draw_fn)();
 

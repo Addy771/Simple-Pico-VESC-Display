@@ -16,6 +16,8 @@ void nv_flash_storage::init(mutex_t *flash_write_lock)
     uint8_t *flash_byte;
     uint address;
 
+    static_assert(sizeof(data) <= BLOCK_SIZE, "Non-volatile storage data exceeds block size! Increase BLOCK_SIZE.");
+
     // Store the mutex we'll use when doing flash writes
     write_lock = flash_write_lock;
 

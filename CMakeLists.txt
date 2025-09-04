@@ -7,6 +7,9 @@ include(pico_sdk_import.cmake)
 
 project(${TARGET_NAME} C CXX ASM)
 
+# Reserve 1 sector (4KB) of flash at the end for non-volatile storage
+math(EXPR PICO_FLASH_SIZE_BYTES "${PICO_FLASH_SIZE_BYTES} - 4096")
+
 # Trim data from binary that isn't going to be used. 
 #This fixes a flash region overflow caused by font data from u8g2
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -ffunction-sections -fdata-sections -Wl,--gc-sections")
