@@ -223,6 +223,7 @@ class page_controller
         uint8_t config_received;
         moving_avg<float> v_in_smoothed;
         moving_avg<float> speed_smoothed;
+        uint8_t skip_frames;
 
 
         page_controller(void);

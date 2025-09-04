@@ -108,6 +108,8 @@ page_controller::page_controller(void)
     // Set ratio of weighted moving averages
     v_in_smoothed.set_ratio(0.7);
     speed_smoothed.set_ratio(0.3);
+
+    skip_frames = 0;
 }
 
 
@@ -225,9 +227,12 @@ void page_controller::update(void)
         DBG_PRINT("Stored odometer value: %.1f km at page %d, block %d\n", esc_data.odometer, nv_settings.page_id, nv_settings.block_id);
         mutex_enter_blocking(&float_mutex);
     }
-
-
     mutex_exit(&float_mutex);     
+
+    if (!skip_frames)
+        skip_frames = FRAMES_TO_SKIP;
+    else
+        skip_frames--;
 }
 
 
@@ -385,19 +390,26 @@ void page_controller::draw_speed_bar(uint8_t x, uint8_t y, float speed)
     uint8_t bar_line_h;
     char axis_value[10];
     uint8_t axis_text_y;
+    static float speed_buf = 0.0f;   
 
     mutex_enter_blocking(&float_mutex);
     speed = fabs(speed);
     bar_max_height = bar_height + bar_x_2_term * bar_width*bar_width;
 
+    // Update values when the current frame is not being skipped
+    if (!skip_frames)
+    {
+        speed_buf = speed;
+    }
+
     // Draw main speed value text
     u8g2_SetFont(&u8g2, u8g2_font_logisoso38_tn);
-    if (speed < 10)
-        draw_string(x+22, y-55, "%1.2f", speed);
+    if (speed_buf < 10)
+        draw_string(x+22, y-55, "%1.2f", speed_buf);
     else if (speed < 100)
-        draw_string(x+22, y-55, "%2.1f", speed);
+        draw_string(x+22, y-55, "%2.1f", speed_buf);
     else
-        draw_string(x+22, y-55, "%3.0f", speed);
+        draw_string(x+22, y-55, "%3.0f", speed_buf);
 
     bar_filled_cnt = (bar_width * speed) / bar_max_speed;
 
@@ -456,11 +468,13 @@ void page_controller::page_main_draw(void)
 {
     static char print_buf[30];
     datetime_t rtc_time;
+    static float battery_voltage_buf = 0.0f;
+    static float battery_current_buf = 0.0f;
+    static float battery_power_buf = 0.0f;
 
     u8g2_ClearBuffer(&u8g2);
-
-    draw_speed_bar(67, 112, speed_smoothed.get_value());
-
+    
+    draw_speed_bar(67, 112, speed_smoothed.get_value());    
     const uint8_t side_bar_y = 27;
 
     // Temperature bars
@@ -476,9 +490,6 @@ void page_controller::page_main_draw(void)
     draw_string(190, side_bar_y-4, "FET");
     draw_string(188, side_bar_y+15, "MTR");
 
-    FET_temp.draw(esc_data.temp_mos);
-    MTR_temp.draw(esc_data.temp_motor);
-
     // Motor current bar
     static bar_graph MTR_current(&u8g2, 0, side_bar_y, 16, 60, 0,  120, LEFT_TO_RIGHT);
     MTR_current.set_font(u8g2_font_t0_11_te);
@@ -486,8 +497,6 @@ void page_controller::page_main_draw(void)
     // Motor current label
     u8g2_SetFont(&u8g2, u8g2_font_helvR08_tf);
     draw_string(0, side_bar_y-19, "Motor Amps");
-
-    MTR_current.draw(fabs(esc_data.current_motor));
 
     // Battery level bar
     static bar_graph batt_level(&u8g2, 0, side_bar_y+30, 16, 60, 0, 100, LEFT_TO_RIGHT);
@@ -497,7 +506,6 @@ void page_controller::page_main_draw(void)
     u8g2_SetFont(&u8g2, u8g2_font_helvR08_tf);    
     draw_string(0, side_bar_y+11, "Battery (%%)");
 
-    batt_level.draw(esc_data.battery_level);
     u8g2_DrawFrame(&u8g2, 59, side_bar_y+17, 5, 10);    // Button-tip to make bar look like a battery 
 
     // Power bar
@@ -505,6 +513,17 @@ void page_controller::page_main_draw(void)
 
     static bar_graph pwr_bar_neg(&u8g2, 0, 127, pwr_bar_h, 128, 0, 5000, RIGHT_TO_LEFT);
     static bar_graph pwr_bar_pos(&u8g2, 127, 127, pwr_bar_h, 127, 0, 5000, LEFT_TO_RIGHT);
+
+    // Group together floating point code and run with mutex
+    mutex_enter_blocking(&float_mutex);
+
+    // If this frame is not to be skipped, update values
+    if (!skip_frames)
+    {
+        battery_voltage_buf = v_in_smoothed.get_value();
+        battery_current_buf = esc_data.current_in;
+        battery_power_buf = esc_data.p_in;
+    }
 
     if (esc_data.p_in >= 0)
     {
@@ -517,19 +536,22 @@ void page_controller::page_main_draw(void)
         pwr_bar_pos.draw(0);        
     }
 
+    batt_level.draw(esc_data.battery_level);    
+    MTR_current.draw(fabs(esc_data.current_motor));   
+    FET_temp.draw(esc_data.temp_mos);
+    MTR_temp.draw(esc_data.temp_motor);     
 
     // Text values
     // Battery power
     u8g2_SetFont(&u8g2, u8g2_font_helvB10_tf);   
 
-    //format_with_si(esc_data.v_in, print_buf, sizeof(print_buf), "V");
-    format_with_si(v_in_smoothed.get_value(), print_buf, sizeof(print_buf), "V");
+    format_with_si(battery_voltage_buf, print_buf, sizeof(print_buf), "V");
     draw_string(0, side_bar_y+46, print_buf);
 
-    format_with_si(esc_data.current_in, print_buf, sizeof(print_buf), "A");
+    format_with_si(battery_current_buf, print_buf, sizeof(print_buf), "A");
     draw_string(0, side_bar_y+64, print_buf);
 
-    format_with_si(esc_data.p_in, print_buf, sizeof(print_buf), "W");
+    format_with_si(battery_power_buf, print_buf, sizeof(print_buf), "W");
     draw_string(0, side_bar_y+82, print_buf);
 
     // Odometer related
@@ -541,6 +563,8 @@ void page_controller::page_main_draw(void)
     draw_string(odo_start_x, side_bar_y+44, "Trip B: %.1f", nv_settings.data.trip_b);    
     draw_string(odo_start_x, side_bar_y+58, "Odo: %.1f", esc_data.odometer);
     draw_string(odo_start_x+10, side_bar_y+72, "(km)");
+
+    mutex_exit(&float_mutex);
 
     // Status / Error icons
     draw_SD_icon(70, 1);
