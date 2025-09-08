@@ -1,4 +1,7 @@
 #include <u8g2.h>
+#include <mui_u8g2.h>
+#include <mui.h>
+#include "mui_def.h"
 #include "page_ctrl.hpp"
 #include "hw_def.h"
 #include "pico/cyw43_arch.h"
@@ -92,7 +95,9 @@ page_controller::page_controller(void)
     // Add page functions to list
     page_fn[0] = (page_draw_fn) &page_controller::page_main_draw;
     page_fn[1] = (page_draw_fn) &page_controller::page_log_draw;
-    page_idx = 0;
+    page_fn[2] = (page_draw_fn) &page_controller::page_cfg_draw;
+    page_idx = 0;   // Default page shown on startup
+    new_page = 1;
 
     // Log system init
     u8log_Init(&u8log, U8LOG_WIDTH, U8LOG_HEIGHT, u8log_buf);
@@ -110,6 +115,8 @@ page_controller::page_controller(void)
     speed_smoothed.set_ratio(0.3);
 
     skip_frames = 0;
+
+    mui_Init(&mui, &u8g2, fds_data, muif_list, sizeof(muif_list) / sizeof(muif_t));
 }
 
 
@@ -180,9 +187,17 @@ void page_controller::update(void)
     // Switch pages
     // If left PB is held and right PB is not, decrement page index if possible
     if (page_idx > 0 && btn_held[PB_LEFT] && btn_state[PB_RIGHT])
+    {
         page_idx--;
+        new_page = 1;
+        btn_lockouts[PB_LEFT] = get_absolute_time();  // Reset time PB was pressed so it's no longer held
+    }
     else if (page_idx < PAGE_COUNT-1 && btn_held[PB_RIGHT] && btn_state[PB_LEFT])
+    {
         page_idx++;
+        new_page = 1;
+        btn_lockouts[PB_RIGHT] = get_absolute_time();  // Reset time PB was pressed so it's no longer held
+    }
 
     // Common calculations
     mutex_enter_blocking(&float_mutex);
@@ -468,118 +483,178 @@ void page_controller::page_main_draw(void)
 {
     static char print_buf[30];
     datetime_t rtc_time;
+    static absolute_time_t last_event_time = get_absolute_time();
     static float battery_voltage_buf = 0.0f;
     static float battery_current_buf = 0.0f;
     static float battery_power_buf = 0.0f;
 
     u8g2_ClearBuffer(&u8g2);
     
-    draw_speed_bar(67, 112, speed_smoothed.get_value());    
-    const uint8_t side_bar_y = 27;
-
-    // Temperature bars
-    static bar_graph FET_temp(&u8g2, 210, side_bar_y, 16, 46, 0, 120, RIGHT_TO_LEFT);
-    static bar_graph MTR_temp(&u8g2, 210, side_bar_y+19, 16, 46, 0, 120, RIGHT_TO_LEFT);
-
-    FET_temp.set_font(u8g2_font_t0_11_te);
-    MTR_temp.set_font(u8g2_font_t0_11_te);
-    
-    // Temperature labels
-    u8g2_SetFont(&u8g2, u8g2_font_helvR08_tf);
-    draw_string(210, side_bar_y-19, "Temps \xB0" "C");
-    draw_string(190, side_bar_y-4, "FET");
-    draw_string(188, side_bar_y+15, "MTR");
-
-    // Motor current bar
-    static bar_graph MTR_current(&u8g2, 0, side_bar_y, 16, 60, 0,  120, LEFT_TO_RIGHT);
-    MTR_current.set_font(u8g2_font_t0_11_te);
-
-    // Motor current label
-    u8g2_SetFont(&u8g2, u8g2_font_helvR08_tf);
-    draw_string(0, side_bar_y-19, "Motor Amps");
-
-    // Battery level bar
-    static bar_graph batt_level(&u8g2, 0, side_bar_y+30, 16, 60, 0, 100, LEFT_TO_RIGHT);
-    batt_level.set_font(u8g2_font_t0_11_te);
-
-    // Battery level label
-    u8g2_SetFont(&u8g2, u8g2_font_helvR08_tf);    
-    draw_string(0, side_bar_y+11, "Battery (%%)");
-
-    u8g2_DrawFrame(&u8g2, 59, side_bar_y+17, 5, 10);    // Button-tip to make bar look like a battery 
-
-    // Power bar
-    const uint8_t pwr_bar_h = 12;
-
-    static bar_graph pwr_bar_neg(&u8g2, 0, 127, pwr_bar_h, 128, 0, 5000, RIGHT_TO_LEFT);
-    static bar_graph pwr_bar_pos(&u8g2, 127, 127, pwr_bar_h, 127, 0, 5000, LEFT_TO_RIGHT);
-
-    // Group together floating point code and run with mutex
-    mutex_enter_blocking(&float_mutex);
-
-    // If this frame is not to be skipped, update values
-    if (!skip_frames)
+    // Tasks that happen once when the page first appears
+    if (new_page)
     {
-        battery_voltage_buf = v_in_smoothed.get_value();
-        battery_current_buf = esc_data.current_in;
-        battery_power_buf = esc_data.p_in;
+        new_page = 0;
+        mui_GotoForm(&mui, 2, 0);   // Trip counters unselected
     }
 
-    if (esc_data.p_in >= 0)
+    // Form 5: Reset trip A counter
+    if (mui_GetCurrentFormId(&mui) == 5)
     {
-        pwr_bar_neg.draw(0);
-        pwr_bar_pos.draw(esc_data.p_in);
+        nv_settings.data.trip_a = 0.0f;
+        nv_settings.store_data();
+        mui_GotoForm(&mui, 3, 0);   // Trip counters selected
     }
-    else
+    // Form 7: Reset trip B counter
+    else if (mui_GetCurrentFormId(&mui) == 7)
     {
-        pwr_bar_neg.draw(fabs(esc_data.p_in));
-        pwr_bar_pos.draw(0);        
-    }
-
-    batt_level.draw(esc_data.battery_level);    
-    MTR_current.draw(fabs(esc_data.current_motor));   
-    FET_temp.draw(esc_data.temp_mos);
-    MTR_temp.draw(esc_data.temp_motor);     
-
-    // Text values
-    // Battery power
-    u8g2_SetFont(&u8g2, u8g2_font_helvB10_tf);   
-
-    format_with_si(battery_voltage_buf, print_buf, sizeof(print_buf), "V");
-    draw_string(0, side_bar_y+46, print_buf);
-
-    format_with_si(battery_current_buf, print_buf, sizeof(print_buf), "A");
-    draw_string(0, side_bar_y+64, print_buf);
-
-    format_with_si(battery_power_buf, print_buf, sizeof(print_buf), "W");
-    draw_string(0, side_bar_y+82, print_buf);
-
-    // Odometer related
-    uint8_t odo_start_x = 192;
-    u8g2_SetFont(&u8g2, u8g2_font_helvR08_tf);    
-    // draw_string(odo_start_x, side_bar_y+30, "Trip A | B");
-    // draw_string(odo_start_x, side_bar_y+44, "1337  1337");
-    draw_string(odo_start_x, side_bar_y+30, "Trip A: %.1f", nv_settings.data.trip_a);
-    draw_string(odo_start_x, side_bar_y+44, "Trip B: %.1f", nv_settings.data.trip_b);    
-    draw_string(odo_start_x, side_bar_y+58, "Odo: %.1f", esc_data.odometer);
-    draw_string(odo_start_x+10, side_bar_y+72, "(km)");
-
-    mutex_exit(&float_mutex);
-
-    // Status / Error icons
-    draw_SD_icon(70, 1);
-    draw_ESC_icon(87, 0);
-    // Wifi?
-    // Load outputs?
-
-    if (rtc_connected)
-    {
-        rtc_get_datetime(&rtc_time);
-        u8g2_SetFont(&u8g2, u8g2_font_t0_11_te);      
-        draw_string(113, 9, "%02d:%02d", rtc_time.hour, rtc_time.min);
+        nv_settings.data.trip_b = 0.0f;
+        nv_settings.store_data();
+        mui_GotoForm(&mui, 3, 0);   // Trip counters selected
     }
 
+    // Don't draw page items when in a prompt form
+    if (mui_GetCurrentFormId(&mui) != 4 && mui_GetCurrentFormId(&mui) != 6)
+    {
+        draw_speed_bar(67, 112, speed_smoothed.get_value());    
+        const uint8_t side_bar_y = 27;
 
+        // Temperature bars
+        static bar_graph FET_temp(&u8g2, 210, side_bar_y, 16, 46, 0, 120, RIGHT_TO_LEFT);
+        static bar_graph MTR_temp(&u8g2, 210, side_bar_y+19, 16, 46, 0, 120, RIGHT_TO_LEFT);
+
+        FET_temp.set_font(u8g2_font_t0_11_te);
+        MTR_temp.set_font(u8g2_font_t0_11_te);
+        
+        // Temperature labels
+        u8g2_SetFont(&u8g2, u8g2_font_helvR08_tf);
+        draw_string(210, side_bar_y-19, "Temps \xB0" "C");
+        draw_string(190, side_bar_y-4, "FET");
+        draw_string(188, side_bar_y+15, "MTR");
+
+        // Motor current bar
+        static bar_graph MTR_current(&u8g2, 0, side_bar_y, 16, 60, 0,  120, LEFT_TO_RIGHT);
+        MTR_current.set_font(u8g2_font_t0_11_te);
+
+        // Motor current label
+        u8g2_SetFont(&u8g2, u8g2_font_helvR08_tf);
+        draw_string(0, side_bar_y-19, "Motor Amps");
+
+        // Battery level bar
+        static bar_graph batt_level(&u8g2, 0, side_bar_y+30, 16, 60, 0, 100, LEFT_TO_RIGHT);
+        batt_level.set_font(u8g2_font_t0_11_te);
+
+        // Battery level label
+        u8g2_SetFont(&u8g2, u8g2_font_helvR08_tf);    
+        draw_string(0, side_bar_y+11, "Battery (%%)");
+
+        u8g2_DrawFrame(&u8g2, 59, side_bar_y+17, 5, 10);    // Button-tip to make bar look like a battery 
+
+        // Power bar
+        const uint8_t pwr_bar_h = 12;
+
+        static bar_graph pwr_bar_neg(&u8g2, 0, 127, pwr_bar_h, 128, 0, 5000, RIGHT_TO_LEFT);
+        static bar_graph pwr_bar_pos(&u8g2, 127, 127, pwr_bar_h, 127, 0, 5000, LEFT_TO_RIGHT);
+
+        // Group together floating point code and run with mutex
+        mutex_enter_blocking(&float_mutex);
+
+        // If this frame is not to be skipped, update values
+        if (!skip_frames)
+        {
+            battery_voltage_buf = v_in_smoothed.get_value();
+            battery_current_buf = esc_data.current_in;
+            battery_power_buf = esc_data.p_in;
+        }
+
+        if (esc_data.p_in >= 0)
+        {
+            pwr_bar_neg.draw(0);
+            pwr_bar_pos.draw(esc_data.p_in);
+        }
+        else
+        {
+            pwr_bar_neg.draw(fabs(esc_data.p_in));
+            pwr_bar_pos.draw(0);        
+        }
+
+        batt_level.draw(esc_data.battery_level);    
+        MTR_current.draw(fabs(esc_data.current_motor));   
+        FET_temp.draw(esc_data.temp_mos);
+        MTR_temp.draw(esc_data.temp_motor);     
+
+        // Text values
+        // Battery power
+        u8g2_SetFont(&u8g2, u8g2_font_helvB10_tf);   
+
+        format_with_si(battery_voltage_buf, print_buf, sizeof(print_buf), "V");
+        draw_string(0, side_bar_y+46, print_buf);
+
+        format_with_si(battery_current_buf, print_buf, sizeof(print_buf), "A");
+        draw_string(0, side_bar_y+64, print_buf);
+
+        format_with_si(battery_power_buf, print_buf, sizeof(print_buf), "W");
+        draw_string(0, side_bar_y+82, print_buf);
+
+        // Odometer related
+        uint8_t odo_start_x = 192;
+        u8g2_SetFont(&u8g2, u8g2_font_helvR08_tf);    
+        // draw_string(odo_start_x, side_bar_y+30, "Trip A | B");
+        // draw_string(odo_start_x, side_bar_y+44, "1337  1337");
+        draw_string(odo_start_x+33, side_bar_y+31, "%.1f", nv_settings.data.trip_a);
+        draw_string(odo_start_x+33, side_bar_y+45, "%.1f", nv_settings.data.trip_b);    
+        draw_string(odo_start_x, side_bar_y+58, "Odo: %.1f", esc_data.odometer);
+        draw_string(odo_start_x+10, side_bar_y+72, "(km)");
+
+        mutex_exit(&float_mutex);
+
+        // Status / Error icons
+        draw_SD_icon(70, 1);
+        draw_ESC_icon(87, 0);
+        // Wifi?
+        // Load outputs?
+
+        if (rtc_connected)
+        {
+            rtc_get_datetime(&rtc_time);
+            u8g2_SetFont(&u8g2, u8g2_font_t0_11_te);      
+            draw_string(113, 9, "%02d:%02d", rtc_time.hour, rtc_time.min);
+        }
+    }
+
+    // Pass button presses to MUI
+    if (btn_pressed[PB_LEFT])
+    {
+        last_event_time = get_absolute_time();
+        mui_PrevField(&mui);
+    }
+    else if (btn_pressed[PB_RIGHT])
+    {
+        last_event_time = get_absolute_time();
+        mui_NextField(&mui);
+    }
+
+    if (btn_pressed[PB_CONFIRM])
+    {
+        last_event_time = get_absolute_time();
+        mui_SendSelect(&mui);
+    }
+    // Trip counters as labels, unselected
+    if (mui_GetCurrentFormId(&mui) == 2)
+    {
+        if (btn_pressed[PB_LEFT] || btn_pressed[PB_RIGHT])
+        {
+            mui_GotoForm(&mui, 3, 0); 
+        }
+    }
+    // Trip counters as buttons, selected
+    else if (mui_GetCurrentFormId(&mui) == 3)
+    {
+        // If timeout is up, return to form 2
+        if ((absolute_time_diff_us(last_event_time, get_absolute_time())/1e6) >= INACTIVITY_TIME_S)
+            mui_GotoForm(&mui, 2, 0);
+    }
+
+    mui_Draw(&mui);
     u8g2_SendBuffer(&u8g2);
 }
 
@@ -597,6 +672,25 @@ void page_controller::page_log_draw(void)
     mutex_enter_blocking(&log_mutex);
     u8g2_DrawLog(&u8g2, 0, 24, &u8log);    // Draw log text area
     mutex_exit(&log_mutex);
+
+    u8g2_SendBuffer(&u8g2);
+}
+
+
+void page_controller::page_cfg_draw(void)
+{
+    // Tasks that happen once when the page first appears
+    if (new_page)
+    {
+        new_page = 0;
+        mui_GotoForm(&mui, 10, 0);   // Config main menu
+    }    
+    u8g2_ClearBuffer(&u8g2);
+    draw_overlay_status();
+
+
+
+    mui_Draw(&mui);
 
     u8g2_SendBuffer(&u8g2);
 }

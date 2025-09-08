@@ -1,4 +1,6 @@
 #include <u8g2.h>
+#include <mui_u8g2.h>
+#include <mui.h>
 #include "pico/stdlib.h"
 #include "hw_def.h"
 #include "pico/sync.h"
@@ -12,7 +14,7 @@
 #ifndef PAGE_CTRL_H
 #define PAGE_CTRL_H
 
-#define PAGE_COUNT 2
+#define PAGE_COUNT 3
 #define BUTTON_COUNT 3  // left, right buttons and center as confirm
 #define EXT_LOAD_COUNT 2    // channel A, B
 
@@ -81,7 +83,7 @@ typedef enum
 class bar_graph
 {
     private:
-        u8g2_t *u8g2;    
+        u8g2_t *u8g2;  
         uint x;
         uint y;
         uint width;
@@ -203,6 +205,7 @@ class page_controller
     public:
         u8g2_t u8g2;
         u8log_t u8log;
+        mui_t mui;         
         uint8_t page_idx;
         page_draw_fn page_fn[PAGE_COUNT];
         absolute_time_t btn_lockouts[BUTTON_COUNT];
@@ -224,6 +227,7 @@ class page_controller
         moving_avg<float> v_in_smoothed;
         moving_avg<float> speed_smoothed;
         uint8_t skip_frames;
+        uint8_t new_page;
 
 
         page_controller(void);
@@ -241,6 +245,7 @@ class page_controller
         // page functions
         void page_main_draw(void);
         void page_log_draw(void);
+        void page_cfg_draw(void);
 };
 
 
