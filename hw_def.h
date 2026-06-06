@@ -59,7 +59,8 @@ UART0 RX | I2C0 SCL | SPI1 CSn | GP13 | 17│●              ●│24 | GP18   
 #define ROLLING_AVG_RATIO 0.3           // Weight between 0-1 of new data in rolling average. Lower values slow the response to changes
 #define ODOMETER_WRITE_INTERVAL_S 10    // Wait a minimum number of seconds between saving odometer to non-volatile flash storage to reduce flash wear
 #define ODOMETER_WRITE_DISTANCE_M 100   // Wait for a minimum number of meters travelled before updating stored odometer value to reduce flash wear
-#define FRAMES_TO_SKIP 2                // Frames to skip updating text values. For each frame the values are updated, the next ones will have the update skipped
+#define FRAMES_TO_SKIP 3                // Frames to skip updating text values. For each frame the values are updated, the next ones will have the update skipped
+#define SD_CARD_POLLING                 // Uncomment to attempt mounting the SD card at regular intervals instead of when the card detect signal is present
 
 
 /* Pinout */
@@ -148,6 +149,7 @@ typedef enum
     LOAD_MODE_ALWAYS_ON,            // Output turns on when display is powered
     LOAD_MODE_ALWAYS_ON_BLINK,      // Output toggles at fixed rate, to drive turn signal lights
     LOAD_MODE_AUTO_LIGHT_AT_DUSK,   // Output turns on at dusk, off at dawn. Relies on RTC time
+    LOAD_MODE_AUTO_ON_DAYTIME,      // Output turns on at dawn, off at dusk. Relies on RTC time
     LOAD_MODE_BRAKE_LIGHT           // Output turns on when regen braking, for driving brake lights
 } ext_load_mode;
 

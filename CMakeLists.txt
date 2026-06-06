@@ -63,6 +63,7 @@ add_executable(${TARGET_NAME}
 	u8x8_interface.cpp
 	hw_def.c
 	page_ctrl.cpp
+	user_cfg.c
 	)
 
 # pico_generate_pio_header(${TARGET_NAME} ${CMAKE_CURRENT_LIST_DIR}/Button-debouncer/button_debounce.pio)

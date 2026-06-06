@@ -7,8 +7,10 @@
 #include "pico/cyw43_arch.h"
 #include "pico/bootrom.h"
 #include "pico/sync.h"
+#include "pico/stdlib.h"
 #include "nv_flash.hpp"
 #include "log.hpp"
+#include "user_cfg.h"
 #include <cstdarg>
 #include <math.h>
 
@@ -22,6 +24,7 @@
 
 
 volatile extern uint8_t vesc_connected;
+extern char *log_filename;
 
 
 // Scale value and add SI prefixes to keep length of number printout short
@@ -92,10 +95,16 @@ page_controller::page_controller(void)
 
     esc_data.odometer = nv_settings.data.odometer;  // Copy odometer value from flash storage
 
+    // Connect NV data to config pointers
+    config_table[1].value = &nv_settings.data.disp_brightness;
+
+
     // Add page functions to list
     page_fn[0] = (page_draw_fn) &page_controller::page_main_draw;
+    //page_fn[1] = (page_draw_fn) &page_controller::page_stats_draw;
     page_fn[1] = (page_draw_fn) &page_controller::page_log_draw;
     page_fn[2] = (page_draw_fn) &page_controller::page_cfg_draw;
+    page_fn[3] = (page_draw_fn) &page_controller::page_details_draw;    
     page_idx = 0;   // Default page shown on startup
     new_page = 1;
 
@@ -109,6 +118,8 @@ page_controller::page_controller(void)
     wheel_diameter = 0.66;
 
     esc_data.battery_level = 0.0;
+    wh_used = 0.0f;
+    session_distance = 0.0f;
 
     // Set ratio of weighted moving averages
     v_in_smoothed.set_ratio(0.7);
@@ -221,8 +232,10 @@ void page_controller::update(void)
     esc_data.odometer += distance_travelled;
     nv_settings.data.trip_a += distance_travelled;
     nv_settings.data.trip_b += distance_travelled;
+    session_distance += distance_travelled;
     prev_kph_for_odometer = raw_speed_kph;
     last_odometer_count = current_time;
+    wh_used += time_hours * esc_data.p_in;
 
     // Decide when odometer and trip counts need to be saved
     static absolute_time_t last_odometer_store_time = get_absolute_time();
@@ -420,7 +433,7 @@ void page_controller::draw_speed_bar(uint8_t x, uint8_t y, float speed)
     // Draw main speed value text
     u8g2_SetFont(&u8g2, u8g2_font_logisoso38_tn);
     if (speed_buf < 10)
-        draw_string(x+22, y-55, "%1.2f", speed_buf);
+        draw_string(x+22, y-55, "%1.1f", speed_buf);
     else if (speed < 100)
         draw_string(x+22, y-55, "%2.1f", speed_buf);
     else
@@ -487,6 +500,7 @@ void page_controller::page_main_draw(void)
     static float battery_voltage_buf = 0.0f;
     static float battery_current_buf = 0.0f;
     static float battery_power_buf = 0.0f;
+    static float efficiency_wh_km_buf = 0.0f;
 
     u8g2_ClearBuffer(&u8g2);
     
@@ -564,6 +578,7 @@ void page_controller::page_main_draw(void)
             battery_voltage_buf = v_in_smoothed.get_value();
             battery_current_buf = esc_data.current_in;
             battery_power_buf = esc_data.p_in;
+            efficiency_wh_km_buf = wh_used / session_distance;
         }
 
         if (esc_data.p_in >= 0)
@@ -603,7 +618,7 @@ void page_controller::page_main_draw(void)
         draw_string(odo_start_x+33, side_bar_y+31, "%.1f", nv_settings.data.trip_a);
         draw_string(odo_start_x+33, side_bar_y+45, "%.1f", nv_settings.data.trip_b);    
         draw_string(odo_start_x, side_bar_y+58, "Odo: %.1f", esc_data.odometer);
-        draw_string(odo_start_x+10, side_bar_y+72, "(km)");
+        draw_string(odo_start_x, side_bar_y+72, "Wh/km: %.1f", efficiency_wh_km_buf);
 
         mutex_exit(&float_mutex);
 
@@ -677,20 +692,168 @@ void page_controller::page_log_draw(void)
 }
 
 
+#define CFG_MENU_ROWS 5
 void page_controller::page_cfg_draw(void)
+{
+    static absolute_time_t last_event_time = get_absolute_time();
+    static config_screen cfg_state = CFG_SCREEN_MAIN;
+    static uint8_t list_first_shown = 0;
+    static uint8_t config_list_selection = 0;
+    static uint8_t cfg_element_list_max = MIN(CFG_MENU_ROWS, config_table_size);     // How many elements of the list can be drawn at once
+    uint8_t menu_text_y;
+    static user_config_setting *editable_setting;
+    
+    // Tasks that happen once when the page first appears
+    if (new_page)
+    {
+        new_page = 0;
+
+    }    
+
+    u8g2_ClearBuffer(&u8g2);
+    draw_overlay_status();
+
+    switch (cfg_state)
+    {
+        case CFG_SCREEN_MAIN:
+            // Label for page
+            u8g2_SetFont(&u8g2, u8g2_font_t0_18_te);
+            draw_string(5, 28, "Display Settings:");
+
+            // Draw config options menu
+            u8g2_SetFont(&u8g2, u8g2_font_helvR08_tf);
+
+            menu_text_y = 50;   // First element y position
+            for (
+                uint8_t cfg_n = list_first_shown; 
+                cfg_n < config_table_size &&
+                cfg_n < list_first_shown + CFG_MENU_ROWS; 
+                cfg_n++
+            )
+            {
+                // If the current item is the selected item, draw a bounding box to show it's selected
+                if (cfg_n == config_list_selection)
+                    u8g2_DrawFrame(&u8g2, 0, menu_text_y - 12, 256, 17);
+
+                draw_string(15, menu_text_y, config_table[cfg_n].display_name);
+                menu_text_y += 18;
+            }
+
+            // Handle button actions
+            if (btn_pressed[PB_LEFT])
+            {
+                // Move up list if possible
+                if (config_list_selection > 0)
+                    config_list_selection--;
+
+                if (list_first_shown > 0)
+                    list_first_shown--;
+            }
+
+            if (btn_pressed[PB_RIGHT])
+            {
+                // Move down list if possible
+                if (config_list_selection < config_table_size - 1)
+                    config_list_selection++;
+
+                if (list_first_shown < (config_table_size - CFG_MENU_ROWS))
+                    list_first_shown++;
+            }
+
+            if (btn_pressed[PB_CONFIRM])
+            {
+                // Go to edit screen of selected config
+                editable_setting = &config_table[config_list_selection];
+
+
+
+                switch (editable_setting->cfg_type)
+                {
+                    case CFG_NUMBER:
+                        cfg_state = CFG_SCREEN_EDIT_NUMBER;
+                        break;
+                    
+                    case CFG_LIST:
+                        cfg_state = CFG_SCREEN_EDIT_LIST;
+                        break;
+
+                    case CFG_DATETIME:
+                        cfg_state = CFG_SCREEN_EDIT_DATETIME;
+                        break;
+                }
+            }
+
+            break;
+
+        case CFG_SCREEN_EDIT_NUMBER:
+            // Label for page
+            u8g2_SetFont(&u8g2, u8g2_font_t0_18_te);
+            draw_string(5, 28, editable_setting->display_name);
+
+            // Editable value text
+            draw_string(15, 70, "Value:");
+
+            u8g2_DrawBox(&u8g2, 68 , 57, 30, 16);    // Fill background behind value text
+
+            // Inverted text for value itself
+            u8g2_SetDrawColor(&u8g2, 0);           
+
+            draw_string(70, 70, "%3d", *(uint8_t *)editable_setting->value);
+
+            // Change font settings back to default mode
+            u8g2_SetDrawColor(&u8g2, 1);
+         
+            
+            if (btn_pressed[PB_LEFT] && *(uint8_t *)editable_setting->value > editable_setting->min_val)
+            {
+                (*(uint8_t *)editable_setting->value)--;
+            }
+
+            if (btn_pressed[PB_RIGHT] && *(uint8_t *)editable_setting->value < editable_setting->max_val)
+            {
+                (*(uint8_t *)editable_setting->value)++;
+            }            
+
+            if (btn_pressed[PB_CONFIRM])
+            {
+                cfg_state = CFG_SCREEN_MAIN;
+                nv_settings.store_data();
+            }
+            break;
+        
+        case CFG_SCREEN_EDIT_LIST:
+        case CFG_SCREEN_EDIT_DATETIME:
+            break;
+    }
+
+
+
+
+    u8g2_SendBuffer(&u8g2);
+}
+
+
+// List details like build date, log file name, etc
+void page_controller::page_details_draw()
 {
     // Tasks that happen once when the page first appears
     if (new_page)
     {
         new_page = 0;
-        mui_GotoForm(&mui, 10, 0);   // Config main menu
+
     }    
+
     u8g2_ClearBuffer(&u8g2);
     draw_overlay_status();
 
+    // Label for page
+    u8g2_SetFont(&u8g2, u8g2_font_t0_18_te);
+    draw_string(5, 28, "Miscellaneous Info:");
 
+    u8g2_SetFont(&u8g2, u8g2_font_helvR08_tf);
 
-    mui_Draw(&mui);
+    draw_string(15, 50, "Firmware built: " __DATE__ " " __TIME__);
+    draw_string(15, 68, "Log filename: %s", log_filename);
 
     u8g2_SendBuffer(&u8g2);
 }

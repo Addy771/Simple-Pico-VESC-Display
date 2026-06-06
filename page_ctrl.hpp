@@ -14,7 +14,7 @@
 #ifndef PAGE_CTRL_H
 #define PAGE_CTRL_H
 
-#define PAGE_COUNT 3
+#define PAGE_COUNT 4
 #define BUTTON_COUNT 3  // left, right buttons and center as confirm
 #define EXT_LOAD_COUNT 2    // channel A, B
 
@@ -226,6 +226,8 @@ class page_controller
         uint8_t config_received;
         moving_avg<float> v_in_smoothed;
         moving_avg<float> speed_smoothed;
+        float wh_used;
+        float session_distance;
         uint8_t skip_frames;
         uint8_t new_page;
 
@@ -246,6 +248,7 @@ class page_controller
         void page_main_draw(void);
         void page_log_draw(void);
         void page_cfg_draw(void);
+        void page_details_draw(void);
 };
 
 

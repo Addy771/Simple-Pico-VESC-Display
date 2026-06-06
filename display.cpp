@@ -203,8 +203,6 @@ int main()
 
         page_ctrl.update();
         page_ctrl.draw_page();
-
-
     }
    
 
@@ -418,7 +416,7 @@ void core1_entry()
     uint8_t temp_id;
     page_ctrl.nv_settings.data.flags |= COMM_USE_CAN;    ///// debug override
     absolute_time_t msg_send_time;
-
+    absolute_time_t sd_last_attempt;
     absolute_time_t next_sample;  
     absolute_time_t comm_retry;  
     FRESULT result;
@@ -464,6 +462,7 @@ void core1_entry()
 
 
     next_sample = get_absolute_time();    
+    sd_last_attempt = get_absolute_time();
     comm_retry = delayed_by_ms(get_absolute_time(), 10*COMM_MSG_TIMEOUT_MS);
     while (true)
     {
@@ -617,7 +616,11 @@ void core1_entry()
                 packet_reset(&vesc_comm);    
 
                 // Wait for the response packet and process it
-                receive_packet_uart(&vesc_comm);   
+                if (receive_packet_uart(&vesc_comm) == 0)
+                {
+                    // No response, consider vesc connection lost
+                    vesc_connected = 0;
+                } 
             }
         }
 
@@ -626,13 +629,27 @@ void core1_entry()
         // CAN gets disabled during SD i/o so CAN interrupts don't affect log writes
 
         // Check if SD card was removed
-        if ((sd_status == SD_PRESENT || sd_status == SD_ERROR) && gpio_get(SD_DETECT_GPIO))
+        if ((sd_status == SD_PRESENT || sd_status == SD_ERROR) 
+#ifndef SD_CARD_POLLING
+            && gpio_get(SD_DETECT_GPIO)
+#endif    
+        )
         {
             sd_status = SD_NOT_PRESENT;
         }
+
         // If SD_DETECT_GPIO == 0 an SD card is connected
-        else if (sd_status == SD_NOT_PRESENT && gpio_get(SD_DETECT_GPIO) == 0)
+        else if (sd_status == SD_NOT_PRESENT 
+#ifndef SD_CARD_POLLING            
+            && gpio_get(SD_DETECT_GPIO) == 0
+#else
+            // Attempt to mount SD card periodically (10M microseconds = 10s)
+            && (sd_last_attempt + 10e6) < get_absolute_time()
+#endif
+            
+        )
         {
+            sd_last_attempt = get_absolute_time();
             DBG_PRINT(/*"\033[2J\033[H"*/ "FILESYSTEM INIT\n");
             can2040_stop(&cbus);            
             result = init_filesystem();
