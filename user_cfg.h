@@ -8,7 +8,8 @@ typedef enum
 {
     CFG_NUMBER,
     CFG_LIST,
-    CFG_DATETIME
+    CFG_DATE_EDIT,
+    CFG_TIME_EDIT
 } user_config_type;
 
 
@@ -18,7 +19,8 @@ typedef enum
     CFG_SCREEN_MAIN,
     CFG_SCREEN_EDIT_NUMBER,
     CFG_SCREEN_EDIT_LIST,
-    CFG_SCREEN_EDIT_DATETIME
+    CFG_SCREEN_EDIT_DATE,
+    CFG_SCREEN_EDIT_TIME
 } config_screen;
 
 
@@ -26,7 +28,15 @@ typedef enum
 typedef enum
 {
     CFG_SPEED_SCALE = 0,
-    CFG_BACKLIGHT_BRIGHTNESS = 1
+    CFG_BACKLIGHT_BRIGHTNESS = 1,
+    CFG_BACKLIGHT_MODE = 2,
+    CFG_DATE = 3,
+    CFG_TIME = 4,
+    CFG_LOAD_A = 5,
+    CFG_LOAD_B = 6,
+    CFG_ESC_COMM = 7,
+    CFG_ESC_CAN_ID = 8,
+    CFG_DISP_CAN_ID = 9
 } config_option_idx;
 
 
@@ -34,12 +44,14 @@ typedef enum
 typedef struct
 {
     const char *display_name;
+    const char *description;
     const user_config_type cfg_type;
     void *value;
     uint8_t min_val;
     uint8_t max_val;
     const char **list_items;
     uint8_t list_count;
+    void *store(void);
 
 } user_config_setting;
 

@@ -95,8 +95,13 @@ page_controller::page_controller(void)
 
     esc_data.odometer = nv_settings.data.odometer;  // Copy odometer value from flash storage
 
-    // Connect NV data to config pointers
-    config_table[1].value = &nv_settings.data.disp_brightness;
+    // Connect NV data elements and update functions to config pointers
+    config_table[CFG_BACKLIGHT_BRIGHTNESS].value = &nv_settings.data.disp_brightness;
+    config_table[CFG_BACKLIGHT_BRIGHTNESS].store = &backlight_bright_store;
+
+    //// Temporarily point CAN ID update functions somewhere that won't cause a crash
+    config_table[CFG_ESC_CAN_ID].store = &backlight_bright_store;
+    config_table[CFG_DISP_CAN_ID].store = &backlight_bright_store;
 
 
     // Add page functions to list
@@ -798,10 +803,17 @@ void page_controller::page_cfg_draw(void)
             // Inverted text for value itself
             u8g2_SetDrawColor(&u8g2, 0);           
 
-            draw_string(70, 70, "%3d", *(uint8_t *)editable_setting->value);
+            if (editable_setting.list_count == 0)
+                draw_string(70, 70, "%3d", *(uint8_t *)editable_setting->value);
+            else
+                draw_string(70, 70, "0x%2X", *(uint8_t *)editable_setting->value);
 
             // Change font settings back to default mode
             u8g2_SetDrawColor(&u8g2, 1);
+            u8g2_SetFont(&u8g2, u8g2_font_helvR08_tf);
+
+            // Draw description text
+            draw_string(5, 90, editable_setting.description);
          
             
             if (btn_pressed[PB_LEFT] && *(uint8_t *)editable_setting->value > editable_setting->min_val)
@@ -822,7 +834,8 @@ void page_controller::page_cfg_draw(void)
             break;
         
         case CFG_SCREEN_EDIT_LIST:
-        case CFG_SCREEN_EDIT_DATETIME:
+        case CFG_SCREEN_EDIT_DATE:
+        case CFG_SCREEN_EDIT_TIME:
             break;
     }
 

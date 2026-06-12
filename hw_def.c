@@ -8,6 +8,8 @@
 #include "hardware/clocks.h"
 #include "hardware/rtc.h"
 #include <hw_def.h>
+#include "user_cfg.h"
+#include "nv_flash.hpp"
 
 #define DISPLAY_PWM_COUNT 1024
 
@@ -255,4 +257,12 @@ void time_to_str(datetime_t *time, char *result_str, uint8_t date_only)
     {
         sprintf(result_str + str_pos, " %d:%02d:%02d", (*time).hour, (*time).min, (*time).sec);
     }
+}
+
+
+// Handle backlight brightness update and store the value in nonvolatile storage
+void backlight_bright_store(void)
+{
+    pwm_set_gpio_level(DISPLAY_BACKLIGHT_GPIO, nv_settings.data.disp_brightness * (DISPLAY_PWM_COUNT / 10));
+    nv_settings.store_data();
 }

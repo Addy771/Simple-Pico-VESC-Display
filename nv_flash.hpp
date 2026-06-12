@@ -16,7 +16,7 @@
 typedef struct 
 {
     uint8_t write_mark = WRITE_MARKER;      // KEEP IN FRONT
-    uint8_t disp_brightness = 0;
+    uint8_t disp_brightness = 1;
     uint8_t load_modes = 0;
     uint8_t flags = 0;
     uint32_t log_num = 0;
