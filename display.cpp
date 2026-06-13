@@ -143,7 +143,7 @@ int main()
     get_rand_32();  // First call of this takes ~1ms to generate the seed
 
     // U8G2 init
-    set_backlight(120);
+    //set_backlight(120);
     u8g2_Setup_st75256_jlx256128_f(&page_ctrl.u8g2, U8G2_R0, U8G2_BYTE_FN, u8x8_gpio_and_delay_pico);
     u8g2_InitDisplay(&page_ctrl.u8g2);    // Init sequence, ends with display in sleep mode
     u8g2_SetContrast(&page_ctrl.u8g2, 170); 

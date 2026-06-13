@@ -9,18 +9,17 @@
 #include "hardware/rtc.h"
 #include <hw_def.h>
 #include "user_cfg.h"
-#include "nv_flash.hpp"
+
 
 #define DISPLAY_PWM_COUNT 1024
 
-extern nv_flash_storage nv_settings;
 
 uint8_t rtc_connected;
 uint8_t rtc_time_valid;
 
 void set_backlight(uint8_t brightness)
 {
-    pwm_set_gpio_level(DISPLAY_BACKLIGHT_GPIO, brightness * (DISPLAY_PWM_COUNT / 256)); 
+    pwm_set_gpio_level(DISPLAY_BACKLIGHT_GPIO, brightness * (DISPLAY_PWM_COUNT / 10)); 
 }
 
 void initialize_gpio(void)
@@ -262,9 +261,3 @@ void time_to_str(datetime_t *time, char *result_str, uint8_t date_only)
 }
 
 
-// Handle backlight brightness update and store the value in nonvolatile storage
-void backlight_bright_store(void)
-{
-    pwm_set_gpio_level(DISPLAY_BACKLIGHT_GPIO, nv_settings.data.disp_brightness * (DISPLAY_PWM_COUNT / 10));
-    nv_settings.store_data();
-}

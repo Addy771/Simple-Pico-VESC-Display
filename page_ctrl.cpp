@@ -841,7 +841,7 @@ void page_controller::page_cfg_draw(void)
             if (btn_pressed[PB_CONFIRM])
             {
                 cfg_state = CFG_SCREEN_MAIN;
-                *editable_setting->store();
+                editable_setting->store();
             }
             break;
         
@@ -893,8 +893,8 @@ void page_controller::page_cfg_draw(void)
             if (btn_pressed[PB_CONFIRM])
             {
                 // Store selection in value field and store it
-                *((*uint8_t)editable_setting->value) = cfg_n;
-                *editable_setting->store();
+                (*(uint8_t *)editable_setting->value) = cfg_n;
+                editable_setting->store();
 
                 // Change back to main page
                 cfg_state = CFG_SCREEN_MAIN;
@@ -964,5 +964,13 @@ void speed_max_store(void)
             break;                                 
     }
 
+    nv_settings.store_data();
+}
+
+
+// Handle backlight brightness update and store the value in nonvolatile storage
+void backlight_bright_store(void)
+{
+    set_backlight(nv_settings.data.disp_brightness);
     nv_settings.store_data();
 }
