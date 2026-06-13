@@ -96,12 +96,18 @@ page_controller::page_controller(void)
     esc_data.odometer = nv_settings.data.odometer;  // Copy odometer value from flash storage
 
     // Connect NV data elements and update functions to config pointers
+    config_table[CFG_SPEED_SCALE].store = &speed_max_store;
     config_table[CFG_BACKLIGHT_BRIGHTNESS].value = &nv_settings.data.disp_brightness;
     config_table[CFG_BACKLIGHT_BRIGHTNESS].store = &backlight_bright_store;
 
-    //// Temporarily point CAN ID update functions somewhere that won't cause a crash
+
+    //// Temporarily point update functions somewhere that won't cause a crash
     config_table[CFG_ESC_CAN_ID].store = &backlight_bright_store;
     config_table[CFG_DISP_CAN_ID].store = &backlight_bright_store;
+    config_table[CFG_ESC_COMM].store = &speed_max_store;
+    config_table[CFG_BACKLIGHT_MODE].store = &speed_max_store;
+    config_table[CFG_LOAD_A].store = &speed_max_store;
+    config_table[CFG_LOAD_B].store = &speed_max_store;
 
 
     // Add page functions to list
@@ -409,7 +415,7 @@ void page_controller::draw_overlay_status(void)
 //  Draw main page speed UI. Includes bar and text speed displays
 void page_controller::draw_speed_bar(uint8_t x, uint8_t y, float speed)
 {
-    static const uint bar_max_speed = nv_settings.data.speed_bar_max;
+    uint *bar_max_speed = &nv_settings.data.speed_bar_max;
     static const uint8_t bar_width = 120;   // 136
     static const uint8_t bar_height = 8;    // Height at the low end of the bar
     static const uint8_t axis_label_height = 14;
@@ -417,7 +423,7 @@ void page_controller::draw_speed_bar(uint8_t x, uint8_t y, float speed)
     static const float bar_x_2_term = 0.002; // x^2 term of parabola shape
 
     uint8_t bar_marker_spacing = bar_width / 4;
-    uint8_t bar_marker_value = bar_max_speed / 4;
+    uint8_t bar_marker_value = *bar_max_speed / 4;
     uint8_t bar_max_height;
     uint8_t bar_filled_cnt;
     uint8_t bar_line_h;
@@ -444,7 +450,7 @@ void page_controller::draw_speed_bar(uint8_t x, uint8_t y, float speed)
     else
         draw_string(x+22, y-55, "%3.0f", speed_buf);
 
-    bar_filled_cnt = (bar_width * speed) / bar_max_speed;
+    bar_filled_cnt = (bar_width * speed) / *bar_max_speed;
 
     // Fill bar with vertical lines according to speed value
     for (uint8_t bar_x = 0; bar_x < bar_filled_cnt; bar_x += 2)
@@ -490,7 +496,7 @@ void page_controller::draw_speed_bar(uint8_t x, uint8_t y, float speed)
 
     // Right edge marker
     u8g2_DrawVLine(&u8g2, x+bar_width, y-axis_label_height, axis_tick_height); 
-    sprintf(axis_value, "%d", bar_max_speed);
+    sprintf(axis_value, "%d", *bar_max_speed);
     draw_string(x+bar_width-u8g2_GetStrWidth(&u8g2, axis_value)/2, axis_text_y, axis_value);    
 
 }
@@ -704,6 +710,8 @@ void page_controller::page_cfg_draw(void)
     static config_screen cfg_state = CFG_SCREEN_MAIN;
     static uint8_t list_first_shown = 0;
     static uint8_t config_list_selection = 0;
+    static uint8_t edit_first_shown = 0;
+    static uint8_t edit_list_selection = 0;
     static uint8_t cfg_element_list_max = MIN(CFG_MENU_ROWS, config_table_size);     // How many elements of the list can be drawn at once
     uint8_t menu_text_y;
     static user_config_setting *editable_setting;
@@ -782,9 +790,12 @@ void page_controller::page_cfg_draw(void)
                         cfg_state = CFG_SCREEN_EDIT_LIST;
                         break;
 
-                    case CFG_DATETIME:
-                        cfg_state = CFG_SCREEN_EDIT_DATETIME;
+                    case CFG_DATE:
+                        cfg_state = CFG_SCREEN_EDIT_DATE;
                         break;
+
+                    case CFG_TIME: 
+                        cfg_state = CFG_SCREEN_EDIT_TIME;
                 }
             }
 
@@ -829,12 +840,73 @@ void page_controller::page_cfg_draw(void)
             if (btn_pressed[PB_CONFIRM])
             {
                 cfg_state = CFG_SCREEN_MAIN;
-                nv_settings.store_data();
+                *editable_setting->store();
             }
             break;
         
         case CFG_SCREEN_EDIT_LIST:
+            // Label for page
+            u8g2_SetFont(&u8g2, u8g2_font_t0_18_te);
+            draw_string(5, 28, editable_setting->display_name);
+
+            // Draw config options menu
+            u8g2_SetFont(&u8g2, u8g2_font_helvR08_tf);
+
+            menu_text_y = 50;   // First element y position
+            for (
+                uint8_t cfg_n = edit_first_shown; 
+                cfg_n < editable_setting->list_count &&
+                cfg_n < list_first_shown + CFG_MENU_ROWS; 
+                cfg_n++
+            )
+            {
+                // If the current item is the selected item, draw a bounding box to show it's selected
+                if (cfg_n == edit_list_selection)
+                    u8g2_DrawFrame(&u8g2, 0, menu_text_y - 12, 256, 17);
+
+                draw_string(15, menu_text_y, editable_setting->list_items[cfg_n]);
+                menu_text_y += 18;
+            }
+
+            // Handle button actions
+            if (btn_pressed[PB_LEFT])
+            {
+                // Move up list if possible
+                if (edit_list_selection > 0)
+                    edit_list_selection--;
+
+                if (edit_first_shown > 0)
+                    edit_first_shown--;
+            }
+
+            if (btn_pressed[PB_RIGHT])
+            {
+                // Move down list if possible
+                if (edit_list_selection < editable_setting->list_count - 1)
+                    edit_list_selection++;
+
+                if (edit_first_shown < (editable_setting->list_count - CFG_MENU_ROWS))
+                    edit_first_shown++;
+            }
+
+            if (btn_pressed[PB_CONFIRM])
+            {
+                // Store selection in value field and store it
+                *((*uint8_t)editable_setting->value) = cfg_n;
+                *editable_setting->store();
+
+                // Change back to main page
+                cfg_state = CFG_SCREEN_MAIN;
+
+                // Restore list selection and position to default
+                edit_list_selection = 0;
+                edit_first_shown = 0;
+
+            }
+            break;
+
         case CFG_SCREEN_EDIT_DATE:
+            break;
         case CFG_SCREEN_EDIT_TIME:
             break;
     }
@@ -869,4 +941,27 @@ void page_controller::page_details_draw()
     draw_string(15, 68, "Log filename: %s", log_filename);
 
     u8g2_SendBuffer(&u8g2);
+}
+
+
+// Update speed bar value and store it
+void speed_max_store(void)
+{
+    switch (config_table[CFG_SPEED_SCALE].value)
+    {
+        case 0:
+            nv_settings.data.speed_bar_max = 30;
+            break;
+        case 1:
+            nv_settings.data.speed_bar_max = 60;
+            break;
+        case 2:
+            nv_settings.data.speed_bar_max = 120;
+            break;
+        case 3:
+            nv_settings.data.speed_bar_max = 180;
+            break;                                 
+    }
+
+    nv_settings.store_data();
 }
