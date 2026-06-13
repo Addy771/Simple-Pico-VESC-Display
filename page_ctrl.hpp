@@ -253,7 +253,12 @@ class page_controller
 
 
 void format_with_si(float value, char *out_buf, size_t buf_len, const char *unit);
+
+// Config update functions
 void speed_max_store(void);
 void backlight_bright_store(void);
+void load_A_store(void);
+void load_B_store(void);
+void backlight_mode_store(void);
 
 #endif

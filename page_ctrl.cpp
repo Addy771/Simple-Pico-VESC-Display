@@ -100,15 +100,19 @@ page_controller::page_controller(void)
     config_table[CFG_SPEED_SCALE].store = &speed_max_store;
     config_table[CFG_BACKLIGHT_BRIGHTNESS].value = &nv_settings.data.disp_brightness;
     config_table[CFG_BACKLIGHT_BRIGHTNESS].store = &backlight_bright_store;
-
+    *((uint8_t *)config_table[CFG_LOAD_A].value) = load_mode[LOAD_A];
+    config_table[CFG_LOAD_A].store = &load_A_store;
+    *((uint8_t *)config_table[CFG_LOAD_B].value) = load_mode[LOAD_B];
+    config_table[CFG_LOAD_B].store = &load_B_store;
+    *((uint8_t *)config_table[CFG_BACKLIGHT_MODE].value) = (nv_settings.data.flags & 0b110) >> 1;   // Backlight mode is in b2:b1
+    config_table[CFG_BACKLIGHT_MODE].store = &backlight_mode_store;
 
     //// Temporarily point update functions somewhere that won't cause a crash
     config_table[CFG_ESC_CAN_ID].store = &backlight_bright_store;
     config_table[CFG_DISP_CAN_ID].store = &backlight_bright_store;
     config_table[CFG_ESC_COMM].store = &speed_max_store;
-    config_table[CFG_BACKLIGHT_MODE].store = &speed_max_store;
-    config_table[CFG_LOAD_A].store = &speed_max_store;
-    config_table[CFG_LOAD_B].store = &speed_max_store;
+
+
 
 
     // Add page functions to list
@@ -705,6 +709,7 @@ void page_controller::page_log_draw(void)
 
 
 #define CFG_MENU_ROWS 5
+#define LIST_EDIT_ROWS 3
 void page_controller::page_cfg_draw(void)
 {
     static absolute_time_t last_event_time = get_absolute_time();
@@ -850,20 +855,24 @@ void page_controller::page_cfg_draw(void)
             u8g2_SetFont(&u8g2, u8g2_font_t0_18_te);
             draw_string(5, 28, editable_setting->display_name);
 
-            // Draw config options menu
+            // Draw list selection items
             u8g2_SetFont(&u8g2, u8g2_font_helvR08_tf);
 
             menu_text_y = 50;   // First element y position
             for (
                 uint8_t cfg_n = edit_first_shown; 
                 cfg_n < editable_setting->list_count &&
-                cfg_n < list_first_shown + CFG_MENU_ROWS; 
+                cfg_n < list_first_shown + LIST_EDIT_ROWS 
                 cfg_n++
             )
             {
                 // If the current item is the selected item, draw a bounding box to show it's selected
                 if (cfg_n == edit_list_selection)
                     u8g2_DrawFrame(&u8g2, 0, menu_text_y - 12, 256, 17);
+
+                // If the current item is the existing configuration value, draw a solid square to indicate this
+                if (cfg_n == (*(uint8_t *)editable_setting->value))
+                    u8g2_DrawBox(&u8g2, 2, menu_text_y - 2, 3, 3);
 
                 draw_string(15, menu_text_y, editable_setting->list_items[cfg_n]);
                 menu_text_y += 18;
@@ -886,14 +895,14 @@ void page_controller::page_cfg_draw(void)
                 if (edit_list_selection < editable_setting->list_count - 1)
                     edit_list_selection++;
 
-                if (edit_first_shown < (editable_setting->list_count - CFG_MENU_ROWS))
+                if (edit_first_shown < (editable_setting->list_count - LIST_EDIT_ROWS))
                     edit_first_shown++;
             }
 
             if (btn_pressed[PB_CONFIRM])
             {
                 // Store selection in value field and store it
-                (*(uint8_t *)editable_setting->value) = cfg_n;
+                (*(uint8_t *)editable_setting->value) = edit_list_selection;
                 editable_setting->store();
 
                 // Change back to main page
@@ -948,7 +957,7 @@ void page_controller::page_details_draw()
 // Update speed bar value and store it
 void speed_max_store(void)
 {
-    switch (*((*uint8_t)config_table[CFG_SPEED_SCALE].value))
+    switch ((*(uint8_t *)config_table[CFG_SPEED_SCALE].value))
     {
         case 0:
             nv_settings.data.speed_bar_max = 30;
@@ -972,5 +981,39 @@ void speed_max_store(void)
 void backlight_bright_store(void)
 {
     set_backlight(nv_settings.data.disp_brightness);
+    nv_settings.store_data();
+}
+
+
+// Handle load mode update and storage
+void load_A_store(void)
+{
+    load_modes[LOAD_A] = *((uint8_t *)config_table[CFG_LOAD_A].value);
+
+    nv_settings.data.load_modes &= 0xF0    // Clear lower nibble
+    nv_settings.data.load_modes |= load_modes[LOAD_A]; // store load A mode in lower nibble
+
+    nv_settings.store_data();
+}
+
+
+// Handle load mode update and storage
+void load_B_store(void)
+{
+    load_modes[LOAD_A] = *((uint8_t *)config_table[CFG_LOAD_B].value);
+
+    nv_settings.data.load_modes &= 0x0F;    // Clear upper nibble
+    nv_settings.data.load_modes |= load_modes[LOAD_B] << 4; // store load B mode in upper nibble
+
+    nv_settings.store_data();
+}
+
+
+// Handle backlight mode update and storage
+void backlight_mode_store(void)
+{
+    nv_settings.data.flags &= 0b11111001;   // Clear b2:b1
+    nv_settings.data.flags |= *((uint8_t *)config_table[CFG_BACKLIGHT_MODE].value) << 1;    // Store mode in b2:b1
+
     nv_settings.store_data();
 }

@@ -153,6 +153,14 @@ typedef enum
     LOAD_MODE_BRAKE_LIGHT           // Output turns on when regen braking, for driving brake lights
 } ext_load_mode;
 
+// LCD backlight modes
+typedef enum
+{
+    BL_MODE_OFF,
+    BL_MODE_ON,
+    BL_MODE_DAYTIME
+} bl_mode;
+
 #define VESC_CAN_ID_MAX 4   // Maximum number of IDs to store of VESCs observed on the CAN bus
 #define CAN_PIO_UNIT_NUM 1              // can2040 pio unit. Must not be shared since it fully consumes 1 pio unit
 

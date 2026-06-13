@@ -71,7 +71,7 @@ user_config_setting config_table[] =
         &load_A_mode,
         0,
         0,
-        (const char *[]){"Disabled", "Always On", "Always On - Blinking", "Brake Activated", "Nighttime", "Daytime"},
+        (const char *[]){"Disabled", "Always On", "Always On - Blinking", "Nighttime", "Daytime", "Brake Activated"},
         6
     },
 
@@ -82,7 +82,7 @@ user_config_setting config_table[] =
         &load_B_mode,
         0,
         0,
-        (const char *[]){"Disabled", "Always On", "Always On - Blinking", "Brake Activated", "Nighttime", "Daytime"},
+        (const char *[]){"Disabled", "Always On", "Always On - Blinking", "Nighttime", "Daytime", "Brake Activated"},
         6
     },
     

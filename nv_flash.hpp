@@ -31,7 +31,9 @@ typedef struct
 
 typedef enum
 {
-    COMM_USE_CAN = (1 << 0)
+    COMM_USE_CAN = (1 << 0),
+    BL_MODE_B0 = (1 << 1),
+    BL_MODE_B1 = (1 << 2)
 } nv_flags;
 
 
