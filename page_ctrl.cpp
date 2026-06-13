@@ -26,6 +26,7 @@
 volatile extern uint8_t vesc_connected;
 extern char *log_filename;
 extern nv_flash_storage nv_settings;
+extern page_controller page_ctrl;
 
 
 // Scale value and add SI prefixes to keep length of number printout short
@@ -988,10 +989,10 @@ void backlight_bright_store(void)
 // Handle load mode update and storage
 void load_A_store(void)
 {
-    load_mode[LOAD_A] = *((uint8_t *)config_table[CFG_LOAD_A].value);
+    page_ctrl.load_mode[LOAD_A] = *((uint8_t *)config_table[CFG_LOAD_A].value);
 
     nv_settings.data.load_modes &= 0xF0    // Clear lower nibble
-    nv_settings.data.load_modes |= load_modes[LOAD_A]; // store load A mode in lower nibble
+    nv_settings.data.load_modes |= page_ctrl.load_mode[LOAD_A]; // store load A mode in lower nibble
 
     nv_settings.store_data();
 }
@@ -1000,10 +1001,10 @@ void load_A_store(void)
 // Handle load mode update and storage
 void load_B_store(void)
 {
-    load_mode[LOAD_B] = *((uint8_t *)config_table[CFG_LOAD_B].value);
+    page_ctrl.load_mode[LOAD_B] = *((uint8_t *)config_table[CFG_LOAD_B].value);
 
     nv_settings.data.load_modes &= 0x0F;    // Clear upper nibble
-    nv_settings.data.load_modes |= load_modes[LOAD_B] << 4; // store load B mode in upper nibble
+    nv_settings.data.load_modes |= page_ctrl.load_mode[LOAD_B] << 4; // store load B mode in upper nibble
 
     nv_settings.store_data();
 }
