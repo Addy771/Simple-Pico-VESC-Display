@@ -51,7 +51,7 @@ typedef struct
     uint8_t max_val;
     const char **list_items;
     uint8_t list_count;
-    void *store(void);
+    void (*store)(void);
 
 } user_config_setting;
 

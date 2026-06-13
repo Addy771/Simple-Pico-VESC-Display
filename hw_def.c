@@ -13,6 +13,8 @@
 
 #define DISPLAY_PWM_COUNT 1024
 
+extern nv_flash_storage nv_settings;
+
 uint8_t rtc_connected;
 uint8_t rtc_time_valid;
 

@@ -25,6 +25,7 @@
 
 volatile extern uint8_t vesc_connected;
 extern char *log_filename;
+extern nv_flash_storage nv_settings;
 
 
 // Scale value and add SI prefixes to keep length of number printout short
@@ -415,7 +416,7 @@ void page_controller::draw_overlay_status(void)
 //  Draw main page speed UI. Includes bar and text speed displays
 void page_controller::draw_speed_bar(uint8_t x, uint8_t y, float speed)
 {
-    uint *bar_max_speed = &nv_settings.data.speed_bar_max;
+    uint8_t *bar_max_speed = &nv_settings.data.speed_bar_max;
     static const uint8_t bar_width = 120;   // 136
     static const uint8_t bar_height = 8;    // Height at the low end of the bar
     static const uint8_t axis_label_height = 14;
@@ -814,7 +815,7 @@ void page_controller::page_cfg_draw(void)
             // Inverted text for value itself
             u8g2_SetDrawColor(&u8g2, 0);           
 
-            if (editable_setting.list_count == 0)
+            if (editable_setting->list_count == 0)
                 draw_string(70, 70, "%3d", *(uint8_t *)editable_setting->value);
             else
                 draw_string(70, 70, "0x%2X", *(uint8_t *)editable_setting->value);
@@ -824,7 +825,7 @@ void page_controller::page_cfg_draw(void)
             u8g2_SetFont(&u8g2, u8g2_font_helvR08_tf);
 
             // Draw description text
-            draw_string(5, 90, editable_setting.description);
+            draw_string(5, 90, editable_setting->description);
          
             
             if (btn_pressed[PB_LEFT] && *(uint8_t *)editable_setting->value > editable_setting->min_val)
@@ -947,7 +948,7 @@ void page_controller::page_details_draw()
 // Update speed bar value and store it
 void speed_max_store(void)
 {
-    switch (config_table[CFG_SPEED_SCALE].value)
+    switch (*((*uint8_t)config_table[CFG_SPEED_SCALE].value))
     {
         case 0:
             nv_settings.data.speed_bar_max = 30;

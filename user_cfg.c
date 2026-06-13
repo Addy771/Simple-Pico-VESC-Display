@@ -48,7 +48,7 @@ user_config_setting config_table[] =
 
     {
         "Date",
-        "Current date, used for log files."
+        "Current date, used for log files.",
         CFG_DATE,
         &current_datetime,
         0,
@@ -57,7 +57,7 @@ user_config_setting config_table[] =
 
     {
         "Time",
-        "Time of day, used for log files and time based behavior."
+        "Time of day, used for log files and time based behavior.",
         CFG_TIME,
         &current_datetime,
         0,
@@ -99,7 +99,7 @@ user_config_setting config_table[] =
 
     {
         "ESC CAN ID override",
-        "Range: 0x00 to 0xFF. If the display connected to the wrong ESC on the CAN bus, it can be manually set here."
+        "Range: 0x00 to 0xFF. If the display connected to the wrong ESC on the CAN bus, it can be manually set here.",
         CFG_NUMBER,
         &esc_can_override,
         0,
