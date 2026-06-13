@@ -862,7 +862,7 @@ void page_controller::page_cfg_draw(void)
             for (
                 uint8_t cfg_n = edit_first_shown; 
                 cfg_n < editable_setting->list_count &&
-                cfg_n < list_first_shown + LIST_EDIT_ROWS 
+                cfg_n < list_first_shown + LIST_EDIT_ROWS; 
                 cfg_n++
             )
             {
@@ -988,7 +988,7 @@ void backlight_bright_store(void)
 // Handle load mode update and storage
 void load_A_store(void)
 {
-    load_modes[LOAD_A] = *((uint8_t *)config_table[CFG_LOAD_A].value);
+    load_mode[LOAD_A] = *((uint8_t *)config_table[CFG_LOAD_A].value);
 
     nv_settings.data.load_modes &= 0xF0    // Clear lower nibble
     nv_settings.data.load_modes |= load_modes[LOAD_A]; // store load A mode in lower nibble
@@ -1000,7 +1000,7 @@ void load_A_store(void)
 // Handle load mode update and storage
 void load_B_store(void)
 {
-    load_modes[LOAD_A] = *((uint8_t *)config_table[CFG_LOAD_B].value);
+    load_mode[LOAD_B] = *((uint8_t *)config_table[CFG_LOAD_B].value);
 
     nv_settings.data.load_modes &= 0x0F;    // Clear upper nibble
     nv_settings.data.load_modes |= load_modes[LOAD_B] << 4; // store load B mode in upper nibble
