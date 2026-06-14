@@ -38,6 +38,8 @@ UART0 RX | I2C0 SCL | SPI1 CSn | GP13 | 17│●              ●│24 | GP18   
 #include "hardware/pio.h"
 #include "hardware/irq.h"
 #include "can2040/src/can2040.h"
+#include <stdint.h>
+#include "pico/util/datetime.h" 
 
 #ifndef HW_DEF_H
 #define HW_DEF_H
@@ -115,6 +117,10 @@ UART0 RX | I2C0 SCL | SPI1 CSn | GP13 | 17│●              ●│24 | GP18   
 #define CYW43_LED_GPIO 0
 #define CYW43_SMPS_PS_GPIO 1
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 
 // DS1307 register map
 typedef enum
@@ -185,5 +191,9 @@ void time_to_str(datetime_t *time, char *result_str, uint8_t date_only);
     #define CAN_PIO_IRQn PIO2_IRQ_0
 #endif
 
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

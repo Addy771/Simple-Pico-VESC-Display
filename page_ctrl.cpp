@@ -3,7 +3,6 @@
 #include <mui.h>
 #include "mui_def.h"
 #include "page_ctrl.hpp"
-#include "hw_def.h"
 #include "pico/cyw43_arch.h"
 #include "pico/bootrom.h"
 #include "pico/sync.h"
@@ -14,6 +13,12 @@
 #include "user_cfg.h"
 #include <cstdarg>
 #include <math.h>
+
+extern "C" {
+    #include "hw_def.h"
+    void set_backlight(unsigned char brightness);
+    void set_rtc_time(datetime_t current_time);
+}
 
 #include "bitmap/sd_ok.xbm"
 #include "bitmap/sd_err.xbm"
@@ -26,7 +31,7 @@
 
 volatile extern uint8_t vesc_connected;
 extern char *log_filename;
-extern nv_flash_storage nv_settings;
+//extern nv_flash_storage page_ctrl.nv_settings;
 extern page_controller page_ctrl;
 
 datetime_t cfg_datetime;
@@ -1080,28 +1085,28 @@ void speed_max_store(void)
     switch ((*(uint8_t *)config_table[CFG_SPEED_SCALE].value))
     {
         case 0:
-            nv_settings.data.speed_bar_max = 30;
+            page_ctrl.nv_settings.data.speed_bar_max = 30;
             break;
         case 1:
-            nv_settings.data.speed_bar_max = 60;
+            page_ctrl.nv_settings.data.speed_bar_max = 60;
             break;
         case 2:
-            nv_settings.data.speed_bar_max = 120;
+            page_ctrl.nv_settings.data.speed_bar_max = 120;
             break;
         case 3:
-            nv_settings.data.speed_bar_max = 180;
+            page_ctrl.nv_settings.data.speed_bar_max = 180;
             break;                                 
     }
 
-    nv_settings.store_data();
+    page_ctrl.nv_settings.store_data();
 }
 
 
 // Handle backlight brightness update and store the value in nonvolatile storage
 void backlight_bright_store(void)
 {
-    set_backlight(nv_settings.data.disp_brightness);
-    nv_settings.store_data();
+    set_backlight(page_ctrl.nv_settings.data.disp_brightness);
+    page_ctrl.nv_settings.store_data();
 }
 
 
@@ -1110,10 +1115,10 @@ void load_A_store(void)
 {
     page_ctrl.load_mode[LOAD_A] = *((uint8_t *)config_table[CFG_LOAD_A].value);
 
-    nv_settings.data.load_modes &= 0xF0;    // Clear lower nibble
-    nv_settings.data.load_modes |= page_ctrl.load_mode[LOAD_A]; // store load A mode in lower nibble
+    page_ctrl.nv_settings.data.load_modes &= 0xF0;    // Clear lower nibble
+    page_ctrl.nv_settings.data.load_modes |= page_ctrl.load_mode[LOAD_A]; // store load A mode in lower nibble
 
-    nv_settings.store_data();
+    page_ctrl.nv_settings.store_data();
 }
 
 
@@ -1122,20 +1127,20 @@ void load_B_store(void)
 {
     page_ctrl.load_mode[LOAD_B] = (*(uint8_t *)config_table[CFG_LOAD_B].value);
 
-    nv_settings.data.load_modes &= 0x0F;    // Clear upper nibble
-    nv_settings.data.load_modes |= page_ctrl.load_mode[LOAD_B] << 4; // store load B mode in upper nibble
+    page_ctrl.nv_settings.data.load_modes &= 0x0F;    // Clear upper nibble
+    page_ctrl.nv_settings.data.load_modes |= page_ctrl.load_mode[LOAD_B] << 4; // store load B mode in upper nibble
 
-    nv_settings.store_data();
+    page_ctrl.nv_settings.store_data();
 }
 
 
 // Handle backlight mode update and storage
 void backlight_mode_store(void)
 {
-    nv_settings.data.flags &= 0b11111001;   // Clear b2:b1
-    nv_settings.data.flags |= (*(uint8_t *)config_table[CFG_BACKLIGHT_MODE].value) << 1;    // Store mode in b2:b1
+    page_ctrl.nv_settings.data.flags &= 0b11111001;   // Clear b2:b1
+    page_ctrl.nv_settings.data.flags |= (*(uint8_t *)config_table[CFG_BACKLIGHT_MODE].value) << 1;    // Store mode in b2:b1
 
-    nv_settings.store_data();
+    page_ctrl.nv_settings.store_data();
 }
 
 
