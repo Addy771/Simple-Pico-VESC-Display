@@ -8,6 +8,7 @@
 #include "pico/bootrom.h"
 #include "pico/sync.h"
 #include "pico/stdlib.h"
+#include "hardware/rtc.h"
 #include "nv_flash.hpp"
 #include "log.hpp"
 #include "user_cfg.h"
@@ -28,6 +29,7 @@ extern char *log_filename;
 extern nv_flash_storage nv_settings;
 extern page_controller page_ctrl;
 
+datetime_t cfg_datetime;
 
 // Scale value and add SI prefixes to keep length of number printout short
 void format_with_si(float value, char *out_buf, size_t buf_len, const char *unit)
@@ -107,6 +109,10 @@ page_controller::page_controller(void)
     config_table[CFG_LOAD_B].store = &load_B_store;
     *((uint8_t *)config_table[CFG_BACKLIGHT_MODE].value) = (nv_settings.data.flags & 0b110) >> 1;   // Backlight mode is in b2:b1
     config_table[CFG_BACKLIGHT_MODE].store = &backlight_mode_store;
+    config_table[CFG_DATE].value = &cfg_datetime;
+    config_table[CFG_DATE].store = &datetime_store;
+    config_table[CFG_TIME].value = &cfg_datetime;
+    config_table[CFG_TIME].store = &datetime_store;    
 
     //// Temporarily point update functions somewhere that won't cause a crash
     config_table[CFG_ESC_CAN_ID].store = &backlight_bright_store;
@@ -719,6 +725,7 @@ void page_controller::page_cfg_draw(void)
     static uint8_t config_list_selection = 0;
     static uint8_t edit_first_shown = 0;
     static uint8_t edit_list_selection = 0;
+    static uint8_t selected_field = 0;
     static uint8_t cfg_element_list_max = MIN(CFG_MENU_ROWS, config_table_size);     // How many elements of the list can be drawn at once
     uint8_t menu_text_y;
     static user_config_setting *editable_setting;
@@ -736,6 +743,7 @@ void page_controller::page_cfg_draw(void)
     switch (cfg_state)
     {
         case CFG_SCREEN_MAIN:
+            rtc_get_datetime(&cfg_datetime);        // Keep editable time current in case it needs to be edited
             // Label for page
             u8g2_SetFont(&u8g2, u8g2_font_t0_18_te);
             draw_string(5, 28, "Display Settings:");
@@ -785,8 +793,6 @@ void page_controller::page_cfg_draw(void)
                 // Go to edit screen of selected config
                 editable_setting = &config_table[config_list_selection];
 
-
-
                 switch (editable_setting->cfg_type)
                 {
                     case CFG_NUMBER:
@@ -804,6 +810,8 @@ void page_controller::page_cfg_draw(void)
                     case CFG_TIME: 
                         cfg_state = CFG_SCREEN_EDIT_TIME;
                 }
+
+                selected_field = 0; // Start at beginning for edit types with multiple fields
             }
 
             break;
@@ -917,6 +925,117 @@ void page_controller::page_cfg_draw(void)
             break;
 
         case CFG_SCREEN_EDIT_DATE:
+            // Label for page
+            u8g2_SetFont(&u8g2, u8g2_font_t0_18_te);
+            draw_string(5, 28, editable_setting->display_name);
+
+            switch (selected_field)
+            {
+                case 0: // year, 10's
+                    u8g2_DrawBox(&u8g2, 68 , 57, 30, 8);   // Fill behind selected field
+
+                    if (btn_pressed[PB_LEFT])
+                    {
+                        if ((*(datetime_t *)editable_setting->value).year >= 2010)
+                            (*(datetime_t *)editable_setting->value).year -= 10;
+                        else
+                            (*(datetime_t *)editable_setting->value).year += 90;    // wrap to 209x
+                    }
+                    else if(btn_pressed[PB_RIGHT])
+                    {
+                        if((*(datetime_t *)editable_setting->value).year <= 2090)
+                            (*(datetime_t *)editable_setting->value).year += 10;
+                        else
+                            (*(datetime_t *)editable_setting->value).year -= 90;
+                    }
+                    break;
+
+                case 1: // year, 1's
+                    u8g2_DrawBox(&u8g2, 76 , 57, 30, 8);   // Fill behind selected field
+
+                    if (btn_pressed[PB_LEFT])
+                    {
+                        if ((*(datetime_t *)editable_setting->value).year % 10 > 0)
+                            (*(datetime_t *)editable_setting->value).year -= 1;
+                        else
+                            (*(datetime_t *)editable_setting->value).year += 9;    // wrap to 20x9
+                    }
+                    else if(btn_pressed[PB_RIGHT])
+                    {
+                        if((*(datetime_t *)editable_setting->value).year % 10 < 9)
+                            (*(datetime_t *)editable_setting->value).year += 1;
+                        else
+                            (*(datetime_t *)editable_setting->value).year -= 9;
+                    }
+                    break;
+
+                case 2: // months
+                    u8g2_DrawBox(&u8g2, 84 , 57, 30, 16);   // Fill behind selected field
+
+                    if (btn_pressed[PB_LEFT])
+                    {
+                        if ((*(datetime_t *)editable_setting->value).month > 0)
+                            (*(datetime_t *)editable_setting->value).month -= 1;
+                        else
+                            (*(datetime_t *)editable_setting->value).month = 12;    
+                    }
+                    else if(btn_pressed[PB_RIGHT])
+                    {
+                        if((*(datetime_t *)editable_setting->value).month < 12)
+                            (*(datetime_t *)editable_setting->value).month += 1;
+                        else
+                            (*(datetime_t *)editable_setting->value).month = 0;
+                    }
+                    break;        
+                    
+                case 3: // day, 10's
+                    u8g2_DrawBox(&u8g2, 108 , 57, 30, 8);   // Fill behind selected field
+
+                    if (btn_pressed[PB_LEFT])
+                    {
+                        if ((*(datetime_t *)editable_setting->value).day / 10 > 0)
+                            (*(datetime_t *)editable_setting->value).day -= 10;
+                        else
+                            (*(datetime_t *)editable_setting->value).day += 30;    // wrap to 3x
+                    }
+                    else if(btn_pressed[PB_RIGHT])
+                    {
+                        if((*(datetime_t *)editable_setting->value).day / 10 < 3)
+                            (*(datetime_t *)editable_setting->value).day += 10;
+                        else
+                            (*(datetime_t *)editable_setting->value).day -= 30;
+                    }
+                    break;                    
+            }
+
+            if (btn_pressed[PB_CONFIRM])
+            {
+                if (selected_field < 3)
+                {
+                    selected_field++;
+                }
+                else
+                {
+                    // Editing finished
+                (*(datetime_t *)editable_setting->value) = cfg_datetime;
+                editable_setting->store();
+
+                // Change back to main page
+                cfg_state = CFG_SCREEN_MAIN;                    
+
+                }
+            }
+
+            u8g2_SetDrawColor(&u8g2, 2);    // XOR mode
+            draw_string(68, 70, "%04d/%02d/%02d", (*(datetime_t *)editable_setting->value).year, (*(datetime_t *)editable_setting->value).month, (*(datetime_t *)editable_setting->value).day); // Draw full date
+
+            // Change font settings back to default mode
+            u8g2_SetDrawColor(&u8g2, 1);
+            u8g2_SetFont(&u8g2, u8g2_font_helvR08_tf);
+
+            // Draw description text
+            draw_string(5, 90, editable_setting->description);
+
             break;
         case CFG_SCREEN_EDIT_TIME:
             break;
@@ -991,7 +1110,7 @@ void load_A_store(void)
 {
     page_ctrl.load_mode[LOAD_A] = *((uint8_t *)config_table[CFG_LOAD_A].value);
 
-    nv_settings.data.load_modes &= 0xF0    // Clear lower nibble
+    nv_settings.data.load_modes &= 0xF0;    // Clear lower nibble
     nv_settings.data.load_modes |= page_ctrl.load_mode[LOAD_A]; // store load A mode in lower nibble
 
     nv_settings.store_data();
@@ -1001,7 +1120,7 @@ void load_A_store(void)
 // Handle load mode update and storage
 void load_B_store(void)
 {
-    page_ctrl.load_mode[LOAD_B] = *((uint8_t *)config_table[CFG_LOAD_B].value);
+    page_ctrl.load_mode[LOAD_B] = (*(uint8_t *)config_table[CFG_LOAD_B].value);
 
     nv_settings.data.load_modes &= 0x0F;    // Clear upper nibble
     nv_settings.data.load_modes |= page_ctrl.load_mode[LOAD_B] << 4; // store load B mode in upper nibble
@@ -1014,7 +1133,14 @@ void load_B_store(void)
 void backlight_mode_store(void)
 {
     nv_settings.data.flags &= 0b11111001;   // Clear b2:b1
-    nv_settings.data.flags |= *((uint8_t *)config_table[CFG_BACKLIGHT_MODE].value) << 1;    // Store mode in b2:b1
+    nv_settings.data.flags |= (*(uint8_t *)config_table[CFG_BACKLIGHT_MODE].value) << 1;    // Store mode in b2:b1
 
     nv_settings.store_data();
+}
+
+
+// Handle datetime update and storage
+void datetime_store(void)
+{
+    set_rtc_time((*(datetime_t *)config_table[CFG_DATE_EDIT].value));
 }

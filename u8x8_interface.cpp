@@ -3,7 +3,7 @@
 #include "pico/stdlib.h"
 #include "hardware/gpio.h"
 #include "hardware/clocks.h"
-#include <hw_def.h>
+#include "hw_def.h"
 #include <u8g2.h>
 #include "spi_tx_9bit.pio.h"
 #include "u8x8_interface.hpp"

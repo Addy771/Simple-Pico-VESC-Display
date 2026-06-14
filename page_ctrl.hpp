@@ -260,5 +260,6 @@ void backlight_bright_store(void);
 void load_A_store(void);
 void load_B_store(void);
 void backlight_mode_store(void);
+void datetime_store(void);
 
 #endif
