@@ -11,6 +11,7 @@
 #include "user_cfg.h"
 #include <stdint.h>
 #include "pico/util/datetime.h" 
+#include "version.h"
 
 #define DISPLAY_PWM_COUNT 1024
 
@@ -152,14 +153,25 @@ void init_external_rtc(void)
         i2c_write_blocking(RTC_I2C_UNIT, RTC_I2C_ADDR, &transmit_buf, 1, false); // set register address
         i2c_read_blocking(RTC_I2C_UNIT, RTC_I2C_ADDR, &rx_byte, 1, false);      
 
+        rtc_time_valid = 0;
         if (rx_byte == RTC_KEY_VALUE)
         {
-            rtc_time_valid = 1;
             get_rtc_time(&ext_rtc_time);    // Get time from external RTC, which will sync the on-chip RTC as well
+
+            // Sanity check the time stored on the external RTC
+            if (ext_rtc_time.year >= BUILD_YEAR && ext_rtc_time.year < 2100)
+                rtc_time_valid = 1;
         }
-        else
+        
+        if (rtc_time_valid == 0)
         {
-            rtc_time_valid = 0;
+            // Real time unknown, fill in a reasonable starting point instead
+            ext_rtc_time.year = BUILD_YEAR;
+            ext_rtc_time.month = BUILD_MONTH;
+            ext_rtc_time.day = BUILD_DAY;
+            ext_rtc_time.hour = 12;
+
+            rtc_set_datetime(&ext_rtc_time);    // Store temporary time in on-chip RTC only
         }
     }
     else

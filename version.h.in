@@ -1,0 +1,6 @@
+#pragma once
+
+#define BUILD_YEAR  @BUILD_YEAR@
+#define BUILD_MONTH @BUILD_MONTH@
+#define BUILD_DAY   @BUILD_DAY@
+#define FW_GIT_HASH "@GIT_HASH@"

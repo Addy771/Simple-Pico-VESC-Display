@@ -42,6 +42,24 @@ add_compile_options(-Wall
 		
 set(CMAKE_SYSTEM_NAME Generic)		
 
+# Build info
+string(TIMESTAMP BUILD_YEAR "%Y")
+string(TIMESTAMP BUILD_MONTH "%m")
+string(TIMESTAMP BUILD_DAY "%d")
+
+execute_process(
+	COMMAND git rev-parse --short HEAD
+	WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+	OUTPUT_VARIABLE GIT_HASH
+	OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+
+configure_file(
+	version.h.in
+	version.h
+	@ONLY
+)
+
 
 # include_directories("./bitmap")
 # include_directories("./bldc")

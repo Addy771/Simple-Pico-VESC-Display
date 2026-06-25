@@ -25,7 +25,7 @@ typedef struct
     float trip_b = 0.0f;
     uint8_t user_vesc_can_id = 0;
     uint8_t user_disp_can_id = 0;
-    uint8_t speed_bar_max = 120;
+    uint8_t speed_bar_max = 0;
 } nv_flash_struct;
 
 

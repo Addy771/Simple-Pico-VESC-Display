@@ -11,6 +11,7 @@ uint8_t load_A_mode, load_B_mode;
 uint8_t esc_comm_mode;
 uint8_t esc_can_override;
 uint8_t disp_can_override;
+uint8_t cfg_reset_bool = 0;
 
 // Configuration options
 user_config_setting config_table[] =
@@ -49,7 +50,7 @@ user_config_setting config_table[] =
     {
         "Date",
         "Current date, used for log files.",
-        CFG_DATE,
+        CFG_DATE_EDIT,
         &current_datetime,
         0,
         0
@@ -58,7 +59,7 @@ user_config_setting config_table[] =
     {
         "Time",
         "Time of day, used for log files and time based behavior.",
-        CFG_TIME,
+        CFG_TIME_EDIT,
         &current_datetime,
         0,
         0
@@ -110,16 +111,25 @@ user_config_setting config_table[] =
 
     {
         "Display CAN ID override",
-        "If the display's CAN ID is conflicting with another device, it can be manually set here",
+        "If the display's CAN ID is conflicting with another device, it can be manually set here.",
         CFG_NUMBER,
         &disp_can_override,
         0,
         255,
         0,
         1   // use list count field to indicate that the value should display as hex
+    },
+
+    {
+        "Restore default settings",
+        "Reset settings and date / time to default values.",
+        CFG_BOOL,
+        &cfg_reset_bool
     }
 
 
 };
 
 const uint8_t config_table_size = sizeof(config_table) / sizeof(user_config_setting);
+
+const uint8_t max_speed_list_values[] = {30, 60, 90, 120};

@@ -57,13 +57,13 @@ UART0 RX | I2C0 SCL | SPI1 CSn | GP13 | 17│●              ●│24 | GP18   
 #define SD_SPI_CLK_HZ 25 * 1000 * 1000
 #define BOOTLOADER_BUTTON_TIME_MS 1000  // Length of time in ms that L/R buttons must be held to enter bootloader mode
 #define BUTTON_LONG_PRESS_MS 500        // Length of time in ms a button must be held to be considered a long press
+#define BUTTON_RETRIGGER_MS 120         // Length of time in ms to trigger another button press if the button is held
 #define COMM_MSG_TIMEOUT_MS 10          // Length of time in ms. If the ESC doesn't reply in this period, it's considered disconnected
 #define ROLLING_AVG_RATIO 0.3           // Weight between 0-1 of new data in rolling average. Lower values slow the response to changes
 #define ODOMETER_WRITE_INTERVAL_S 10    // Wait a minimum number of seconds between saving odometer to non-volatile flash storage to reduce flash wear
 #define ODOMETER_WRITE_DISTANCE_M 100   // Wait for a minimum number of meters travelled before updating stored odometer value to reduce flash wear
 #define FRAMES_TO_SKIP 3                // Frames to skip updating text values. For each frame the values are updated, the next ones will have the update skipped
-#define SD_CARD_POLLING                 // Uncomment to attempt mounting the SD card at regular intervals instead of when the card detect signal is present
-
+//#define SD_CARD_POLLING                 // Uncomment to attempt mounting the SD card at regular intervals instead of when the card detect signal is present
 
 /* Pinout */
 
@@ -164,7 +164,7 @@ typedef enum
 {
     BL_MODE_OFF,
     BL_MODE_ON,
-    BL_MODE_DAYTIME
+    BL_MODE_NIGHT
 } bl_mode;
 
 #define VESC_CAN_ID_MAX 4   // Maximum number of IDs to store of VESCs observed on the CAN bus

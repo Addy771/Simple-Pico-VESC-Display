@@ -9,7 +9,8 @@ typedef enum
     CFG_NUMBER,
     CFG_LIST,
     CFG_DATE_EDIT,
-    CFG_TIME_EDIT
+    CFG_TIME_EDIT,
+    CFG_BOOL
 } user_config_type;
 
 
@@ -20,7 +21,8 @@ typedef enum
     CFG_SCREEN_EDIT_NUMBER,
     CFG_SCREEN_EDIT_LIST,
     CFG_SCREEN_EDIT_DATE,
-    CFG_SCREEN_EDIT_TIME
+    CFG_SCREEN_EDIT_TIME,
+    CFG_SCREEN_EDIT_BOOL
 } config_screen;
 
 
@@ -36,7 +38,8 @@ typedef enum
     CFG_LOAD_B = 6,
     CFG_ESC_COMM = 7,
     CFG_ESC_CAN_ID = 8,
-    CFG_DISP_CAN_ID = 9
+    CFG_DISP_CAN_ID = 9,
+    CFG_DISP_RESET_SETTINGS = 10    // must be last item
 } config_option_idx;
 
 
@@ -57,7 +60,7 @@ typedef struct
 
 
 extern user_config_setting config_table[];
-
 extern const uint8_t config_table_size;
 
+extern const uint8_t max_speed_list_values[];
 #endif

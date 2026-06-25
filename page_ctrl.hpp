@@ -230,6 +230,7 @@ class page_controller
         float session_distance;
         uint8_t skip_frames;
         uint8_t new_page;
+        uint8_t btn_retrigger;
 
 
         page_controller(void);
@@ -261,5 +262,6 @@ void load_A_store(void);
 void load_B_store(void);
 void backlight_mode_store(void);
 void datetime_store(void);
+void cfg_reset(void);
 
 #endif
