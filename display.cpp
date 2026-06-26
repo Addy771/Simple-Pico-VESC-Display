@@ -130,6 +130,7 @@ page_controller page_ctrl;
 log_data_t *data_pt;
 mutex_t *flash_mutex, *float_mutex;
 
+
 // Core 0
 int main()
 {
@@ -468,7 +469,7 @@ void core1_entry()
     {
         mutex_enter_blocking(flash_mutex);  // Don't allow flash erase/write while running core1 code
 
-        if (!page_ctrl.config_received && comm_retry < get_absolute_time())
+        if (!config_received && comm_retry < get_absolute_time())
         {
             // Generate config request messages
             memset(request_msg.msg, 0, 6);     
@@ -628,6 +629,12 @@ void core1_entry()
         ///////////// Logging /////////////
         // CAN gets disabled during SD i/o so CAN interrupts don't affect log writes
 
+        // Compute speed in kph
+        mutex_enter_blocking(float_mutex);        
+        raw_speed_kph = calc_speed_kph(page_ctrl.esc_data.rpm);
+        page_ctrl.esc_data.speed_kph = raw_speed_kph;    
+        mutex_exit(float_mutex);    
+
         // Check if SD card was removed
         if ((sd_status == SD_PRESENT || sd_status == SD_ERROR) 
 #ifndef SD_CARD_POLLING
@@ -762,16 +769,16 @@ void process_data(uint8_t *data, size_t len)
 
         case COMM_GET_MCCONF_TEMP:
             vesc_connected = 1;         
-            page_ctrl.config_received = 1;
+            config_received = 1;
             idx += 40;  // Skip past config info we don't use
-            page_ctrl.motor_poles = data[idx++];
+            motor_poles = data[idx++];
 
             mutex_enter_blocking(float_mutex);            
-            page_ctrl.gear_ratio = buffer_get_float32_auto(data, &idx);
-            page_ctrl.wheel_diameter = buffer_get_float32_auto(data, &idx);
+            gear_ratio = buffer_get_float32_auto(data, &idx);
+            wheel_diameter = buffer_get_float32_auto(data, &idx);
             DBG_PRINT("Received ESC motor config:\n");
             DBG_PRINT("%d poles, %.2f gear ratio, \n%.2fmm wheel diameter\n",
-                page_ctrl.motor_poles, page_ctrl.gear_ratio, page_ctrl.wheel_diameter*1000);
+                motor_poles, gear_ratio, wheel_diameter*1000);
             mutex_exit(float_mutex);            
             break;
 

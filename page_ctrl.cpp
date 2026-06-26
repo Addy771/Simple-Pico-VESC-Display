@@ -36,6 +36,11 @@ extern char log_filename[];
 extern page_controller page_ctrl;
 
 datetime_t cfg_datetime;
+float raw_speed_kph;
+uint8_t motor_poles;
+float gear_ratio;
+float wheel_diameter;
+uint8_t config_received;
 
 // Scale value and add SI prefixes to keep length of number printout short
 void format_with_si(float value, char *out_buf, size_t buf_len, const char *unit)
@@ -59,13 +64,13 @@ void format_with_si(float value, char *out_buf, size_t buf_len, const char *unit
 }
 
 // Compute speed using data and config values from ESC
-inline float page_controller::calc_speed_kph()
+float calc_speed_kph(float erpm)
 {
     if (motor_poles <= 0 || wheel_diameter <= 0.0f || config_received == 0) return 0.0f;
 
     uint8_t pole_pairs = motor_poles / 2;
     float circumference = wheel_diameter * M_PI;
-    float mech_rpm = static_cast<float>(esc_data.rpm) / pole_pairs;
+    float mech_rpm = static_cast<float>(erpm) / pole_pairs;
     float mech_rps = mech_rpm / 60.0f;
     float speed_m_per_s = mech_rps * circumference;
     float speed_kph = speed_m_per_s * 3.6f; // speed_m_per_s * 3600 seconds / 1000m
@@ -134,10 +139,10 @@ page_controller::page_controller(void)
     // Add page functions to list
     page_fn[0] = (page_draw_fn) &page_controller::page_main_draw;
     //page_fn[1] = (page_draw_fn) &page_controller::page_stats_draw;
-    page_fn[1] = (page_draw_fn) &page_controller::page_log_draw;
-    page_fn[2] = (page_draw_fn) &page_controller::page_cfg_draw;
+    page_fn[1] = (page_draw_fn) &page_controller::page_cfg_draw;    
+    page_fn[2] = (page_draw_fn) &page_controller::page_log_draw;
     page_fn[3] = (page_draw_fn) &page_controller::page_details_draw;    
-    page_idx = 2;   // Default page shown on startup
+    page_idx = 0;   // Default page shown on startup
     new_page = 1;
 
     // Log system init
@@ -169,7 +174,6 @@ void page_controller::update(void)
     uint8_t btn_new_state[BUTTON_COUNT];
     absolute_time_t btn_poll_time;
     uint btn_time_diff;
-    float raw_speed_kph;
 
     // Handle load output tasks
     update_load_outputs();
@@ -272,7 +276,8 @@ void page_controller::update(void)
 
     v_in_smoothed.update(esc_data.v_in);
 
-    raw_speed_kph = calc_speed_kph();
+    // raw_speed_kph = calc_speed_kph();
+    // esc_data.speed_kph = raw_speed_kph;
     speed_smoothed.update(raw_speed_kph);
 
     static absolute_time_t last_odometer_count = get_absolute_time();
@@ -371,6 +376,34 @@ void page_controller::draw_string(uint16_t x_coord, uint16_t y_coord, const char
 
     vsnprintf(string_buf, sizeof(string_buf), format, args);
     u8g2_DrawStr(&u8g2, x_coord, y_coord, string_buf);
+}
+
+// Draw a string containing multiple lines split by newline characters
+void page_controller::draw_string_lines(uint16_t x_coord, uint16_t y_coord, const char* full_string)
+{
+    uint8_t char_height = u8g2_GetMaxCharHeight(&u8g2);     // Get height of current font
+    uint16_t line_start = 0;
+    uint16_t str_pos = 0;
+    char line_buf[100];
+
+    // Scan string character by character
+    do
+    {
+        // If newline detected, copy previous portion of string up to newline into new buffer
+        if (full_string[str_pos] == '\n')
+        {
+            strncpy(line_buf, full_string + line_start, str_pos - line_start);
+            line_buf[str_pos - line_start] = '\0';              // Terminate line string
+            u8g2_DrawStr(&u8g2, x_coord, y_coord, line_buf);    // Print line of text at the correct Y position
+
+            y_coord += char_height + 2; // Move down one line with extra clearance
+            line_start = str_pos + 1;
+        }
+
+    } while (full_string[str_pos++] != '\0');    // End once \0 detected
+
+    // Print last part of string
+    u8g2_DrawStr(&u8g2, x_coord, y_coord, full_string + line_start);
 }
 
 
@@ -495,6 +528,10 @@ void page_controller::draw_speed_bar(uint8_t x, uint8_t y, float speed)
         draw_string(x+22, y-55, "%2.1f", speed_buf);
     else
         draw_string(x+22, y-55, "%3.0f", speed_buf);
+
+    // Keep bars within graph space
+    if (speed > bar_max_speed)
+        speed = bar_max_speed;
 
     bar_filled_cnt = (bar_width * speed) / bar_max_speed;
 
@@ -750,7 +787,7 @@ void page_controller::page_log_draw(void)
 
 
 #define CFG_MENU_ROWS 5
-#define LIST_EDIT_ROWS 3
+#define LIST_EDIT_ROWS 5
 void page_controller::page_cfg_draw(void)
 {
     static absolute_time_t last_event_time = get_absolute_time();
@@ -881,7 +918,7 @@ void page_controller::page_cfg_draw(void)
             u8g2_SetFont(&u8g2, u8g2_font_helvR08_tf);
 
             // Draw description text
-            draw_string(5, 90, editable_setting->description);
+            draw_string_lines(5, 90, editable_setting->description);
          
             
             if (btn_pressed[PB_LEFT] && *(uint8_t *)editable_setting->value > editable_setting->min_val)
@@ -921,7 +958,7 @@ void page_controller::page_cfg_draw(void)
             {
                 // If the current item is the selected item, draw a bounding box to show it's selected
                 if (cfg_n == edit_list_selection)
-                    u8g2_DrawFrame(&u8g2, 0, menu_text_y - 12, 256, 17);
+                    u8g2_DrawFrame(&u8g2, 0, menu_text_y - 12, 120, 17);
 
                 // If the current item is the existing configuration value, draw a solid square to indicate this
                 if (cfg_n == (*(uint8_t *)editable_setting->value))
@@ -930,6 +967,9 @@ void page_controller::page_cfg_draw(void)
                 draw_string(15, menu_text_y, editable_setting->list_items[cfg_n]);
                 menu_text_y += 18;
             }
+
+            // Draw description text
+            draw_string_lines(125, 50, editable_setting->description);            
 
             // Handle button actions
             if (btn_pressed[PB_LEFT])

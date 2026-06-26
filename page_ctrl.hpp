@@ -25,6 +25,11 @@
 #define STATUS_HEIGHT 12
 
 typedef void (*page_draw_fn)();
+extern float raw_speed_kph;
+extern uint8_t motor_poles;
+extern float gear_ratio;
+extern float wheel_diameter;
+extern uint8_t config_received;
 
 typedef enum
 {
@@ -220,10 +225,6 @@ class page_controller
         mutex_t flash_mutex;
         nv_flash_storage nv_settings;
         log_data_t esc_data;
-        uint8_t motor_poles;
-        float gear_ratio;
-        float wheel_diameter;
-        uint8_t config_received;
         moving_avg<float> v_in_smoothed;
         moving_avg<float> speed_smoothed;
         float wh_used;
@@ -237,13 +238,13 @@ class page_controller
         void update(void);
         void draw_page(void);
         void draw_string(uint16_t x_coord, uint16_t y_coord, const char* format, ...);
+        void draw_string_lines(uint16_t x_coord, uint16_t y_coord, const char* full_string);        
         void draw_SD_icon(uint16_t x_coord, uint16_t y_coord);
         void draw_ESC_icon(uint16_t x_coord, uint16_t y_coord);
         void draw_overlay_status(void);
         void draw_speed_bar(uint8_t x, uint8_t y, float speed);
         void update_load_outputs(void);
         void log_write_string(char *log_str);
-        inline float calc_speed_kph();
 
         // page functions
         void page_main_draw(void);
@@ -254,6 +255,7 @@ class page_controller
 
 
 void format_with_si(float value, char *out_buf, size_t buf_len, const char *unit);
+float calc_speed_kph(float erpm);
 
 // Config update functions
 void speed_max_store(void);

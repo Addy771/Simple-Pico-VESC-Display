@@ -18,7 +18,7 @@ user_config_setting config_table[] =
 {
     {
         "Speedometer Scale",
-        "Maximum speed shown on the speed bar graph.",
+        "Maximum speed shown on \nthe speed bar graph.",
         CFG_LIST,
         &speedo_max,
         0,
@@ -38,7 +38,7 @@ user_config_setting config_table[] =
 
     {
         "Backlight Mode",
-        "LCD screen backlight behavior.",
+        "LCD screen backlight \nbehavior.",
         CFG_LIST,
         &backlight_mode,
         0,
@@ -67,7 +67,7 @@ user_config_setting config_table[] =
 
     {
         "Load Channel A Mode",
-        "Load channel output behavior. Time-based modes require RTC time to be set, otherwise they will keep the output on permanently.",
+        "Load output behavior. \nTime-based modes require \nRTC time to be set, \notherwise they will keep the \noutput on permanently.",
         CFG_LIST,
         &load_A_mode,
         0,
@@ -78,7 +78,7 @@ user_config_setting config_table[] =
 
     {
         "Load Channel B Mode",
-        "Load channel output behavior. Time-based modes require RTC time to be set, otherwise they will keep the output on permanently.",
+        "Load output behavior. \nTime-based modes require \nRTC time to be set, \notherwise they will keep the \noutput on permanently.",
         CFG_LIST,
         &load_B_mode,
         0,
@@ -89,7 +89,7 @@ user_config_setting config_table[] =
     
     {
         "ESC Communication Mode",
-        "Interface that the display will use to communicate with the ESC.",
+        "Interface that the display will \nuse to communicate with \nthe ESC.",
         CFG_LIST,
         &esc_comm_mode,
         0,
@@ -100,7 +100,7 @@ user_config_setting config_table[] =
 
     {
         "ESC CAN ID override",
-        "Range: 0x00 to 0xFF. If the display connected to the wrong ESC on the CAN bus, it can be manually set here.",
+        "Range: 0x00 to 0xFF. If the display connected \nto the wrong ESC on the CAN bus, \nit can be manually set here.",
         CFG_NUMBER,
         &esc_can_override,
         0,
@@ -111,7 +111,7 @@ user_config_setting config_table[] =
 
     {
         "Display CAN ID override",
-        "If the display's CAN ID is conflicting with another device, it can be manually set here.",
+        "If the display's CAN ID is conflicting with another \ndevice, it can be manually set here.",
         CFG_NUMBER,
         &disp_can_override,
         0,
