@@ -39,7 +39,9 @@ typedef enum
     CFG_ESC_COMM = 7,
     CFG_ESC_CAN_ID = 8,
     CFG_DISP_CAN_ID = 9,
-    CFG_DISP_RESET_SETTINGS = 10    // must be last item
+    CFG_DAY_START = 10,
+    CFG_NIGHT_START = 11,
+    CFG_DISP_RESET_SETTINGS = 12    // must be last item
 } config_option_idx;
 
 

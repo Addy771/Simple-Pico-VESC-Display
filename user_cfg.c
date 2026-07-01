@@ -121,6 +121,24 @@ user_config_setting config_table[] =
     },
 
     {
+        "Daytime Transition",
+        "Start of daytime period. Seconds are ignored",
+        CFG_TIME_EDIT,
+        0,
+        0,
+        0
+    },   
+
+    {
+        "Nighttime Transition",
+        "Start of nighttime period. Seconds are ignored",
+        CFG_TIME_EDIT,
+        0,
+        0,
+        0
+    },       
+
+    {
         "Restore default settings",
         "Reset settings and date / time to default values.",
         CFG_BOOL,

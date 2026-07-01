@@ -13,6 +13,12 @@
 #define MAX_BLOCKS (FLASH_PAGE_SIZE / BLOCK_SIZE)
 
 
+typedef struct
+{
+    uint8_t hour = 0;
+    uint8_t minute = 0;
+}   time_of_day_t;
+
 typedef struct 
 {
     uint8_t write_mark = WRITE_MARKER;      // KEEP IN FRONT
@@ -26,6 +32,9 @@ typedef struct
     uint8_t user_vesc_can_id = 0;
     uint8_t user_disp_can_id = 0;
     uint8_t speed_bar_max = 0;
+    uint8_t spare_0 = 0;
+    time_of_day_t day_start = {9, 0};
+    time_of_day_t night_start = {17, 0};
 } nv_flash_struct;
 
 

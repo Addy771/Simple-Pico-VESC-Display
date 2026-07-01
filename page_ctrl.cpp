@@ -36,6 +36,10 @@ extern char log_filename[];
 extern page_controller page_ctrl;
 
 datetime_t cfg_datetime;
+datetime_t day_start;
+datetime_t night_start;
+uint8_t is_day;
+uint8_t brake_active;
 float raw_speed_kph;
 uint8_t motor_poles;
 float gear_ratio;
@@ -63,6 +67,7 @@ void format_with_si(float value, char *out_buf, size_t buf_len, const char *unit
     snprintf(out_buf, buf_len, "%.1f%s%s", value, si_prefixes[exp + 2], unit);
 }
 
+
 // Compute speed using data and config values from ESC
 float calc_speed_kph(float erpm)
 {
@@ -77,6 +82,45 @@ float calc_speed_kph(float erpm)
     return speed_kph;
 
 }
+
+
+// Packs time of day into a uint16_t for fast comparisons
+static uint16_t time_packed(const time_of_day_t *time)
+{
+    return ((uint16_t)time->hour << 8) | time->minute;
+}
+
+
+// Return whether the current time is within the daytime period
+uint8_t is_daytime (void)
+{
+    datetime_t time_now;
+    time_of_day_t current_time;
+    uint16_t current_time_packed;
+    uint16_t day_start_packed;
+    uint16_t night_start_packed;
+
+    // Get current time in packed form
+    rtc_get_datetime(&time_now);
+    current_time.hour = time_now.hour;
+    current_time.minute = time_now.min;
+    current_time_packed = time_packed(&current_time);
+
+    day_start_packed = time_packed(&page_ctrl.nv_settings.data.day_start);
+    night_start_packed = time_packed(&page_ctrl.nv_settings.data.night_start);
+
+    // Comparison is different if it wraps around midnight
+    if (day_start_packed < night_start_packed)
+    {
+        return (current_time_packed >= day_start_packed) && (current_time_packed < night_start_packed);
+    }
+    else
+    {
+        return (current_time_packed >= day_start_packed) || (current_time_packed < night_start_packed); 
+    }
+
+}
+
 
 page_controller::page_controller(void)
 {
@@ -110,6 +154,12 @@ page_controller::page_controller(void)
     load_mode[LOAD_B] = (nv_settings.data.load_modes & 0xF0) >> 4;  // Upper nibble has B channel mode
 
     esc_data.odometer = nv_settings.data.odometer;  // Copy odometer value from flash storage
+    day_start.hour = nv_settings.data.day_start.hour;
+    day_start.min = nv_settings.data.day_start.minute;
+    night_start.hour = nv_settings.data.night_start.hour;
+    night_start.min = nv_settings.data.night_start.minute;
+
+    // Determine whether it's day or night
 
     // Connect NV data elements and update functions to config pointers
     config_table[CFG_SPEED_SCALE].store = &speed_max_store;
@@ -127,6 +177,10 @@ page_controller::page_controller(void)
     config_table[CFG_TIME].value = &cfg_datetime;
     config_table[CFG_TIME].store = &datetime_store;  
     config_table[CFG_DISP_RESET_SETTINGS].store = &cfg_reset;
+    config_table[CFG_DAY_START].value = &day_start;
+    config_table[CFG_DAY_START].store = &day_start_store;
+    config_table[CFG_NIGHT_START].value = &night_start;
+    config_table[CFG_NIGHT_START].store = &night_start_store;
 
     //// Temporarily point update functions somewhere that won't cause a crash
     config_table[CFG_ESC_CAN_ID].store = &backlight_bright_store;
@@ -175,8 +229,7 @@ void page_controller::update(void)
     absolute_time_t btn_poll_time;
     uint btn_time_diff;
 
-    // Handle load output tasks
-    update_load_outputs();
+    is_day = is_daytime();
 
     // Update backlight depending on mode
     switch (*((uint8_t *)config_table[CFG_BACKLIGHT_MODE].value))
@@ -189,8 +242,11 @@ void page_controller::update(void)
             set_backlight(*((uint8_t *)config_table[CFG_BACKLIGHT_BRIGHTNESS].value));
             break;
 
-        //// TODO: implement night based mode once day/night times are defined
         case BL_MODE_NIGHT:
+            if (is_day)
+                set_backlight(0);
+            else
+                set_backlight(*((uint8_t *)config_table[CFG_BACKLIGHT_BRIGHTNESS].value));
             break;
     }
 
@@ -317,18 +373,27 @@ void page_controller::update(void)
         DBG_PRINT("Stored odometer value: %.1f km at page %d, block %d\n", esc_data.odometer, nv_settings.page_id, nv_settings.block_id);
         mutex_enter_blocking(&float_mutex);
     }
+
+    brake_active = esc_data.current_motor < -0.5;     
     mutex_exit(&float_mutex);     
 
     if (!skip_frames)
         skip_frames = FRAMES_TO_SKIP;
     else
         skip_frames--;
+
+    // Handle load output tasks
+    update_load_outputs();        
 }
 
 
 // Update load GPIO as necessary
 void page_controller::update_load_outputs(void)
 {
+    datetime_t current_time;
+
+    rtc_get_datetime(&current_time);
+
     for (uint8_t i = 0; i < EXT_LOAD_COUNT; i++)
     {
         switch (load_mode[i])
@@ -342,8 +407,23 @@ void page_controller::update_load_outputs(void)
                 break;      
 
             case LOAD_MODE_ALWAYS_ON_BLINK:      
+                if ((time_us_32() / 1500000) & 1)   // Blink every 1.5s
+                    gpio_put(load_gpio[i], 1);
+                else
+                    gpio_put(load_gpio[i], 0);                
+                break;
+
             case LOAD_MODE_AUTO_LIGHT_AT_DUSK:   
+                if (!is_day)
+                    gpio_put(load_gpio[i], 1);
+                else
+                    gpio_put(load_gpio[i], 0);
+
             case LOAD_MODE_BRAKE_LIGHT:  
+                if (brake_active)
+                    gpio_put(load_gpio[i], 1);
+                else
+                    gpio_put(load_gpio[i], 0);            
                 break;        
         }
 
@@ -1190,12 +1270,12 @@ void page_controller::page_cfg_draw(void)
                 else
                 {
                     // Editing finished
-                (*(datetime_t *)editable_setting->value) = cfg_datetime;
-                editable_setting->store();
-                page_ctrl.nv_settings.store_data();
+                    //(*(datetime_t *)editable_setting->value) = cfg_datetime;
+                    editable_setting->store();
+                    page_ctrl.nv_settings.store_data();
 
-                // Change back to main page
-                cfg_state = CFG_SCREEN_MAIN;                    
+                    // Change back to main page
+                    cfg_state = CFG_SCREEN_MAIN;                    
 
                 }
             }
@@ -1343,6 +1423,22 @@ void datetime_store(void)
 }
 
 
+// Handle day_start storage
+void day_start_store(void)
+{
+    page_ctrl.nv_settings.data.day_start.hour = (*(datetime_t *)config_table[CFG_DAY_START].value).hour;
+    page_ctrl.nv_settings.data.day_start.minute = (*(datetime_t *)config_table[CFG_DAY_START].value).min;
+}
+
+
+// Handle day_start storage
+void night_start_store(void)
+{
+    page_ctrl.nv_settings.data.night_start.hour = (*(datetime_t *)config_table[CFG_NIGHT_START].value).hour;
+    page_ctrl.nv_settings.data.night_start.minute = (*(datetime_t *)config_table[CFG_NIGHT_START].value).min;
+}
+
+
 // Reset config to defaults
 void cfg_reset(void)
 {
@@ -1367,11 +1463,18 @@ void cfg_reset(void)
     uint8_t sram_key = 0;
     set_rtc_sram(RTC_SRAM_KEY, &sram_key, 1);
 
-    // Set time to sensible default
+    // Set times to sensible default
     cfg_datetime.year = BUILD_YEAR;
     cfg_datetime.month = BUILD_MONTH;
     cfg_datetime.day = BUILD_DAY;
     cfg_datetime.hour = 0;
+    (*(datetime_t *)config_table[CFG_DAY_START].value).hour = 9;
+    (*(datetime_t *)config_table[CFG_DAY_START].value).min = 0;
+    (*(datetime_t *)config_table[CFG_NIGHT_START].value).hour = 17;
+    (*(datetime_t *)config_table[CFG_NIGHT_START].value).min = 0;
+    day_start_store();
+    night_start_store();
+
 
     rtc_set_datetime(&cfg_datetime);
     rtc_time_valid = 0;
