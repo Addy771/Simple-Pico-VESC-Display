@@ -56,6 +56,9 @@ class moving_avg
     public:
         moving_avg() : data_val(), prev_ratio(0.5), new_ratio(0.5) {}
 
+        // ratio = 1 - e^(-tS/T)
+        // tS = update period
+        // T = time constant
         void set_ratio(float ratio)
         {
             new_ratio = ratio;

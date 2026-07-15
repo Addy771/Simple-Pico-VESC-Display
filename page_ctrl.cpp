@@ -45,6 +45,9 @@ uint8_t motor_poles;
 float gear_ratio;
 float wheel_diameter;
 uint8_t config_received;
+moving_avg<float> motor_amps_avg;
+moving_avg<float> batt_amps_avg;
+
 
 // Scale value and add SI prefixes to keep length of number printout short
 void format_with_si(float value, char *out_buf, size_t buf_len, const char *unit)
@@ -192,7 +195,6 @@ page_controller::page_controller(void)
 
     // Add page functions to list
     page_fn[0] = (page_draw_fn) &page_controller::page_main_draw;
-    //page_fn[1] = (page_draw_fn) &page_controller::page_stats_draw;
     page_fn[1] = (page_draw_fn) &page_controller::page_cfg_draw;    
     page_fn[2] = (page_draw_fn) &page_controller::page_log_draw;
     page_fn[3] = (page_draw_fn) &page_controller::page_details_draw;    
@@ -213,8 +215,10 @@ page_controller::page_controller(void)
     session_distance = 0.0f;
 
     // Set ratio of weighted moving averages
-    v_in_smoothed.set_ratio(0.7);
-    speed_smoothed.set_ratio(0.3);
+    v_in_smoothed.set_ratio(1 - pow(M_E, -(LOG_SAMPLE_RATE) / (0.5*(ROLLING_AVG_TC))));
+    speed_smoothed.set_ratio(1 - pow(M_E, -(LOG_SAMPLE_RATE) / (ROLLING_AVG_TC)));
+    motor_amps_avg.set_ratio(1 - pow(M_E, -(LOG_SAMPLE_RATE) / 0.016666));    // ( 60sec )^-1 = 0.016666
+    batt_amps_avg.set_ratio(1 - pow(M_E, -(LOG_SAMPLE_RATE) / 0.016666)); 
 
     skip_frames = 0;
 
@@ -243,7 +247,7 @@ void page_controller::update(void)
             break;
 
         case BL_MODE_NIGHT:
-            if (is_day)
+            if (is_day || !rtc_time_valid)
                 set_backlight(0);
             else
                 set_backlight(*((uint8_t *)config_table[CFG_BACKLIGHT_BRIGHTNESS].value));
@@ -278,7 +282,7 @@ void page_controller::update(void)
 
 
         // Do retrigger instead of hold if enabled
-        if (btn_retrigger && btn_held[i])
+        if (btn_retrigger && btn_state[i] == 0 && btn_time_diff > BUTTON_RETRIGGER_MS*1000)
         {
             btn_held[i] = 0;
             btn_pressed[i] = 1;
@@ -314,15 +318,22 @@ void page_controller::update(void)
 
     // Switch pages
     // If left PB is held and right PB is not, decrement page index if possible
-    if (page_idx > 0 && btn_held[PB_LEFT] && btn_state[PB_RIGHT])
+    if (btn_held[PB_LEFT] && btn_state[PB_RIGHT])
     {
-        page_idx--;
-        new_page = 1;
-        btn_lockouts[PB_LEFT] = get_absolute_time();  // Reset time PB was pressed so it's no longer held
+        if (page_idx > 0)
+            page_idx--;
+        else
+            page_idx = PAGE_COUNT-1;    // Wrap to last page
+
+            new_page = 1;
+            btn_lockouts[PB_LEFT] = get_absolute_time();  // Reset time PB was pressed so it's no longer held
     }
-    else if (page_idx < PAGE_COUNT-1 && btn_held[PB_RIGHT] && btn_state[PB_LEFT])
+    else if (btn_held[PB_RIGHT] && btn_state[PB_LEFT])
     {
-        page_idx++;
+        if(page_idx < PAGE_COUNT-1)
+            page_idx++;
+        else
+            page_idx = 0;       // Wrap to first page
         new_page = 1;
         btn_lockouts[PB_RIGHT] = get_absolute_time();  // Reset time PB was pressed so it's no longer held
     }
@@ -335,6 +346,8 @@ void page_controller::update(void)
     // raw_speed_kph = calc_speed_kph();
     // esc_data.speed_kph = raw_speed_kph;
     speed_smoothed.update(raw_speed_kph);
+    motor_amps_avg.update(fabs(esc_data.current_motor)); 
+    batt_amps_avg.update(fabs(esc_data.current_in));
 
     static absolute_time_t last_odometer_count = get_absolute_time();
     absolute_time_t current_time = get_absolute_time();
@@ -407,17 +420,25 @@ void page_controller::update_load_outputs(void)
                 break;      
 
             case LOAD_MODE_ALWAYS_ON_BLINK:      
-                if ((time_us_32() / 1500000) & 1)   // Blink every 1.5s
+                if ((time_us_32() / 750000) & 1)   // Blink with 1.5s period
                     gpio_put(load_gpio[i], 1);
                 else
                     gpio_put(load_gpio[i], 0);                
                 break;
 
             case LOAD_MODE_AUTO_LIGHT_AT_DUSK:   
-                if (!is_day)
+                if (!is_day || !rtc_time_valid)
                     gpio_put(load_gpio[i], 1);
                 else
                     gpio_put(load_gpio[i], 0);
+                break;
+
+            case LOAD_MODE_AUTO_ON_DAYTIME:
+                if (is_day || !rtc_time_valid)
+                    gpio_put(load_gpio[i], 1);
+                else
+                    gpio_put(load_gpio[i], 0);
+                break;            
 
             case LOAD_MODE_BRAKE_LIGHT:  
                 if (brake_active)
@@ -1368,6 +1389,9 @@ void page_controller::page_details_draw()
     draw_string(15, 50, "Firmware built: " __DATE__ " " __TIME__);
     draw_string(15, 68, "Git Hash: %s", FW_GIT_HASH);
     draw_string(15, 86, "Log filename: %s", log_filename);
+    draw_string(15, 104, "Average motor current: %.1f A", motor_amps_avg.get_value());
+    draw_string(15, 122, "Average battery current: %.1f A", batt_amps_avg.get_value());
+
     u8g2_SendBuffer(&u8g2);
 }
 
