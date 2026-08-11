@@ -13,6 +13,7 @@
 #include "user_cfg.h"
 #include <cstdarg>
 #include <math.h>
+#include <stddef.h>
 #include "version.h"
 
 extern "C" {
@@ -44,6 +45,8 @@ float raw_speed_kph;
 uint8_t motor_poles;
 float gear_ratio;
 float wheel_diameter;
+float watt_min;
+float watt_max;
 uint8_t config_received;
 moving_avg<float> motor_amps_avg;
 moving_avg<float> batt_amps_avg;

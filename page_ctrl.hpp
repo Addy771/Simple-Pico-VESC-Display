@@ -29,6 +29,8 @@ extern float raw_speed_kph;
 extern uint8_t motor_poles;
 extern float gear_ratio;
 extern float wheel_diameter;
+extern float watt_min;
+extern float watt_max;
 extern uint8_t config_received;
 
 typedef enum

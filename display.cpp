@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <stdio.h>
+#include <stddef.h>
 #include "pico/stdlib.h"
 #include "pico/multicore.h"
 #include "pico/sync.h"
@@ -196,6 +197,19 @@ int main()
     float_mutex = &page_ctrl.float_mutex;
     multicore_launch_core1(core1_entry);
 
+    datetime_t sram_time;
+
+    // Get time that had been stored in RTC SRAM
+    if (rtc_connected)
+    {
+        get_rtc_sram(offsetof(rtc_sram_map_t, LAST_TIME_SEEN), (uint8_t *)&sram_time, sizeof(sram_time));
+        DBG_PRINT(
+            "System was last running on %4d/%02d/%02d,\n at %02d:%02d:%02d\n", \
+            sram_time.year, sram_time.month, sram_time.day, \
+            sram_time.hour, sram_time.min, sram_time.sec                    
+        );
+    }
+
     next_frame_time = get_absolute_time();
     while(1)
     {
@@ -204,6 +218,10 @@ int main()
 
         page_ctrl.update();
         page_ctrl.draw_page();
+
+        // Use idle time between frames to store current time to RTC SRAM
+        rtc_get_datetime(&sram_time);
+        set_rtc_sram_nonblocking(offsetof(rtc_sram_map_t, LAST_TIME_SEEN), (const uint8_t *)&sram_time, sizeof(sram_time));
     }
    
 
@@ -377,6 +395,14 @@ void receive_packet_can(can2040_msg *rx_msg, uint8_t can_command_id)
                 vesc_can_ids[first_empty_id] = vesc_id;
             break;
 
+        /*
+        // A VESC device replied to a CAN_PACKET_PING
+        case CAN_PACKET_PONG:
+
+        // data[0] = ID of controller
+        // data[1] = HW_TYPE_VESC (indicates it's an ESC and not a VESC Express or something)
+
+        */
         default:
             DBG_PRINT("Unhandled packet type.\n");
             break;
@@ -770,15 +796,38 @@ void process_data(uint8_t *data, size_t len)
         case COMM_GET_MCCONF_TEMP:
             vesc_connected = 1;         
             config_received = 1;
-            idx += 40;  // Skip past config info we don't use
+            /*
+
+            All float32 unless specified
+            0:  current_min_scale
+            4:  current_max_scale
+            8:  min_erpm
+            12: max_erpm
+            16: min_duty
+            20: max_duty
+             24: watt_min
+             28: watt_max
+            32: in_current_min
+            36: in_current_max
+             40: motor_poles (uint8)
+             41: gear_ratio
+             45: wheel_diameter
+            */
+            mutex_enter_blocking(float_mutex);  
+
+            idx = 24+1;
+            watt_min = buffer_get_float32_auto(data, &idx);
+            watt_max = buffer_get_float32_auto(data, &idx);
+
+            idx = 40+1;  
             motor_poles = data[idx++];
 
-            mutex_enter_blocking(float_mutex);            
             gear_ratio = buffer_get_float32_auto(data, &idx);
             wheel_diameter = buffer_get_float32_auto(data, &idx);
             DBG_PRINT("Received ESC motor config:\n");
             DBG_PRINT("%d poles, %.2f gear ratio, \n%.2fmm wheel diameter\n",
                 motor_poles, gear_ratio, wheel_diameter*1000);
+            DBG_PRINT("watt_min: %.0f, watt_max: %.0f\n", watt_min, watt_max);
             mutex_exit(float_mutex);            
             break;
 

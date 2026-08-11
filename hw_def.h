@@ -137,11 +137,19 @@ typedef enum
     DS1307_SRAM_END = 0x3F
 } rtc_ds1307_map;
 
-// RTC SRAM allocation
+// RTC SRAM allocation (old method)
 typedef enum
 {
-    RTC_SRAM_KEY = DS1307_SRAM_START
+    RTC_SRAM_KEY = DS1307_SRAM_START,
 } rtc_sram;
+
+// RTD SRAM allocation (new method)
+typedef struct __attribute__((packed))
+{
+    uint64_t RTC_REGISTERS; 
+    uint8_t RTC_USER_SRAM;
+    datetime_t LAST_TIME_SEEN;
+} rtc_sram_map_t;
 
 #define RTC_KEY_VALUE 0x55
 
@@ -177,7 +185,8 @@ void set_backlight(uint8_t brightness);
 void init_external_rtc(void);
 void set_rtc_time(datetime_t current_time);
 void get_rtc_time(datetime_t *rtc_time);
-void set_rtc_sram(uint8_t sram_address, uint8_t *data, uint8_t len);
+void set_rtc_sram(uint8_t sram_address, const uint8_t *data, uint8_t len);
+void set_rtc_sram_nonblocking(uint8_t sram_address, const uint8_t *data, uint8_t len);
 void get_rtc_sram(uint8_t sram_address, uint8_t *data, uint8_t len);
 void time_to_str(datetime_t *time, char *result_str, uint8_t date_only);
 

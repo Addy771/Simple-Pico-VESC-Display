@@ -47,6 +47,11 @@ string(TIMESTAMP BUILD_YEAR "%Y")
 string(TIMESTAMP BUILD_MONTH "%m")
 string(TIMESTAMP BUILD_DAY "%d")
 
+# Force base-10 evaluation to strip leading zeros, otherwise the numbers are interpreted as octal
+math(EXPR BUILD_YEAR "${BUILD_YEAR}" OUTPUT_FORMAT DECIMAL)
+math(EXPR BUILD_MONTH "${BUILD_MONTH}" OUTPUT_FORMAT DECIMAL)
+math(EXPR BUILD_DAY "${BUILD_DAY}" OUTPUT_FORMAT DECIMAL)
+
 execute_process(
 	COMMAND git rev-parse --short HEAD
 	WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}

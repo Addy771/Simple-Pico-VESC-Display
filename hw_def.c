@@ -241,23 +241,50 @@ void get_rtc_time(datetime_t *rtc_time)
     rtc_set_datetime(rtc_time);
 }
 
+
 // Write 1 or more bytes to RTC's SRAM region
-void set_rtc_sram(uint8_t sram_address, uint8_t *data, uint8_t len)
+void set_rtc_sram(uint8_t sram_address, const uint8_t *data, uint8_t len)
 {
-    uint8_t sram_buf[57];
+    // Set register pointer, nostop=true to retain control of the bus
+    i2c_write_blocking(RTC_I2C_UNIT, RTC_I2C_ADDR, &sram_address, 1, true);
 
-    sram_buf[0] = sram_address;
-    memcpy(sram_buf+1, data, len); 
+    i2c_write_blocking(RTC_I2C_UNIT, RTC_I2C_ADDR, data, len, false);    
+}
 
-    i2c_write_blocking(RTC_I2C_UNIT, RTC_I2C_ADDR, &sram_buf, len + 1, false);    
+
+// Write 1 or more bytes to RTC's SRAM region without blocking when possible
+void set_rtc_sram_nonblocking(uint8_t sram_address, const uint8_t *data, uint8_t len)
+{
+    // Set i2c address, R/!W bit zero for write
+    i2c_set_slave_mode(RTC_I2C_UNIT, false, RTC_I2C_ADDR);
+
+    // Wait for space in TX FIFO
+    while(i2c_get_write_available(RTC_I2C_UNIT) == 0);
+    i2c_write_byte_raw(RTC_I2C_UNIT, sram_address);     // RTC register pointer
+
+    // Write bytes except for the last one
+    while (len > 1)
+    {
+        // Wait for space in TX FIFO
+        while(i2c_get_write_available(RTC_I2C_UNIT) == 0);
+        i2c_write_byte_raw(RTC_I2C_UNIT, *data++);    // Write 1 byte to FIFO
+        len--;
+    } 
+
+    // Wait for space in TX FIFO
+    while(i2c_get_write_available(RTC_I2C_UNIT) == 0);
+    
+    // Add the final data byte with STOP bit
+    i2c_get_hw(RTC_I2C_UNIT)->data_cmd = *data | I2C_IC_DATA_CMD_STOP_BITS;
 }
 
 // Read 1 or more bytes from RTC's SRAM region
 void get_rtc_sram(uint8_t sram_address, uint8_t *data, uint8_t len)
 {
-    i2c_write_blocking(RTC_I2C_UNIT, RTC_I2C_ADDR, &sram_address, 1, false); // set register pointer
+    // Set register pointer, nostop=true to retain control of the bus
+    i2c_write_blocking(RTC_I2C_UNIT, RTC_I2C_ADDR, &sram_address, 1, true);
     
-    i2c_read_blocking(RTC_I2C_UNIT, RTC_I2C_ADDR, data, 7, len);
+    i2c_read_blocking(RTC_I2C_UNIT, RTC_I2C_ADDR, data, len, false);
 }
 
 
