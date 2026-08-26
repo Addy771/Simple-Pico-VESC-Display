@@ -1,11 +1,14 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <stddef.h>
+#include <time.h>
 #include "pico/stdlib.h"
 #include "pico/multicore.h"
 #include "pico/sync.h"
 #include "pico/cyw43_arch.h"
 #include "pico/rand.h"
+#include "pico/stdlib.h"
+#include "pico/util/datetime.h"
 
 #include "hardware/i2c.h"
 #include "hardware/clocks.h"
@@ -198,15 +201,38 @@ int main()
     multicore_launch_core1(core1_entry);
 
     datetime_t sram_time;
+    datetime_t current_time;
+    uint32_t time_past_s;
+    uint16_t time_diff_day;
+    uint8_t time_diff_hour;
+    uint8_t time_diff_min;
+
+    #define SECONDS_IN_MIN  60
+    #define SECONDS_IN_HOUR 3600
+    #define SECONDS_IN_DAY  86400    
+
 
     // Get time that had been stored in RTC SRAM
     if (rtc_connected)
     {
         get_rtc_sram(offsetof(rtc_sram_map_t, LAST_TIME_SEEN), (uint8_t *)&sram_time, sizeof(sram_time));
+        rtc_get_datetime(&current_time);
+
+        // Compute the time difference
+        time_past_s = datetime_to_sec(&current_time) - datetime_to_sec(&sram_time);
+        time_diff_day = time_past_s / SECONDS_IN_DAY;
+        time_past_s = time_past_s % SECONDS_IN_DAY;
+
+        time_diff_hour = time_past_s / SECONDS_IN_HOUR;
+        time_past_s = time_past_s % SECONDS_IN_HOUR;
+
+        time_diff_min = time_past_s / SECONDS_IN_MIN;
+
         DBG_PRINT(
-            "System was last running on %4d/%02d/%02d,\n at %02d:%02d:%02d\n", \
+            "System was last running on:\n %4d/%02d/%02d, at %02d:%02d:%02d\n (%d days, %d hours and %d minutes ago)\n", \
             sram_time.year, sram_time.month, sram_time.day, \
-            sram_time.hour, sram_time.min, sram_time.sec                    
+            sram_time.hour, sram_time.min, sram_time.sec, \
+            time_diff_day, time_diff_hour, time_diff_min                    
         );
     }
 

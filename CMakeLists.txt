@@ -121,9 +121,9 @@ set_target_properties(${TARGET_NAME} PROPERTIES LINKER_LANGUAGE CXX)
 
 target_link_options(${TARGET_NAME} PRIVATE -Xlinker --print-memory-usage)
 
-# pio 1 will be used for CAN, everything else goes on pio 0
+
 target_compile_definitions(${TARGET_NAME} PRIVATE
-    CYW43_SPI_PIO_PREFERRED_PIO=0
+    CYW43_SPI_PIO_PREFERRED_PIO=0	# pio 1 will be used for CAN, everything else goes on pio 0
 )
 
 # Needed for can2040 to find cmsis headers
@@ -137,6 +137,7 @@ target_link_libraries(${TARGET_NAME}
 	pico_malloc
 	pico_cyw43_arch_none
 	pico_rand
+	pico_util
 	hardware_i2c 
 	hardware_adc 
 	hardware_pwm 

@@ -301,3 +301,20 @@ void time_to_str(datetime_t *time, char *result_str, uint8_t date_only)
 }
 
 
+time_t datetime_to_sec(const datetime_t *t)
+{
+    struct tm tm_time;
+
+    // Map pico datetime_t fields to standard C struct tm fields
+    tm_time.tm_sec = t->sec;
+    tm_time.tm_min = t->min;
+    tm_time.tm_hour = t->hour;
+    tm_time.tm_mday = t->day;
+    tm_time.tm_mon = t->month - 1;      // tm_mon is 0-11
+    tm_time.tm_year = t->year - 1900;   // tm_year is years since 1900
+    tm_time.tm_isdst = -1;              // let library determine dst
+
+    return mktime(&tm_time);
+}
+
+

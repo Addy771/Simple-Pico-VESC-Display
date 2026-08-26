@@ -39,6 +39,7 @@ UART0 RX | I2C0 SCL | SPI1 CSn | GP13 | 17│●              ●│24 | GP18   
 #include "hardware/irq.h"
 #include "can2040/src/can2040.h"
 #include <stdint.h>
+#include <time.h>
 #include "pico/util/datetime.h" 
 
 #ifndef HW_DEF_H
@@ -144,6 +145,7 @@ typedef enum
 } rtc_sram;
 
 // RTD SRAM allocation (new method)
+// User SRAM is 55 bytes long on DS1307
 typedef struct __attribute__((packed))
 {
     uint64_t RTC_REGISTERS; 
@@ -189,6 +191,7 @@ void set_rtc_sram(uint8_t sram_address, const uint8_t *data, uint8_t len);
 void set_rtc_sram_nonblocking(uint8_t sram_address, const uint8_t *data, uint8_t len);
 void get_rtc_sram(uint8_t sram_address, uint8_t *data, uint8_t len);
 void time_to_str(datetime_t *time, char *result_str, uint8_t date_only);
+time_t datetime_to_sec(const datetime_t *t);
 
 
 
