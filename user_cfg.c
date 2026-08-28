@@ -100,11 +100,11 @@ user_config_setting config_table[] =
 
     {
         "ESC CAN ID override",
-        "Range: 0x00 to 0xFF. If the display connected \nto the wrong ESC on the CAN bus, \nit can be manually set here.",
+        "Range: 0x01 to 0xFE. If the display connected to \nthe wrong ESC on the CAN bus, it can be \nmanually set here. Set to 0 to disable.",
         CFG_NUMBER,
         &esc_can_override,
         0,
-        255,
+        254,
         0,
         1   // use list count field to indicate that the value should display as hex
     },

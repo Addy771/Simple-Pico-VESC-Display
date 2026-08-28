@@ -99,7 +99,7 @@ circular_buf<comm_msg, 10> comm_request_buf;
 uint8_t vesc_can_ids[VESC_CAN_ID_MAX];
 uint8_t vesc_id_count = 0;
 uint8_t display_can_id = 0;
-uint8_t awaiting_response;
+uint8_t awaiting_response = 0;
 
 uint32_t real_baudrate = 0;
 uint8_t response_code = 0;
@@ -403,34 +403,73 @@ void receive_packet_can(can2040_msg *rx_msg, uint8_t can_command_id)
             }
             break;
 
-        case CAN_PACKET_NOTIFY_BOOT:
-            // Add this VESC's ID if it's not known already
-            vesc_id = rx_msg->id & 0xFF;
-            first_empty_id = 0xFF;
-            for (uint8_t idn = 0; idn < VESC_CAN_ID_MAX; idn++)
+
+        case CAN_PACKET_PROCESS_SHORT_BUFFER:
+            // Only process this packet if it was sent to the display specifically
+            if ((rx_msg->id & 0xFF) == display_can_id)
             {
-                if (vesc_can_ids[idn] == 0 && first_empty_id == 0xFF)
-                {
-                    first_empty_id = idn;
-                }
-                // If the ID is in the list already, abort
-                if (vesc_can_ids[idn] == vesc_id)
-                    return;
+                buffer_len = rx_msg->dlc - 2;
+                memcpy(rx_buffer, rx_msg+2, buffer_len);
+                process_data(rx_buffer, buffer_len);
+                awaiting_response = 0;
             }
-            if (first_empty_id != 0xFF)
-                vesc_can_ids[first_empty_id] = vesc_id;
             break;
 
-        /*
-        // A VESC device replied to a CAN_PACKET_PING
+        //A VESC device replied to a CAN_PACKET_PING
         case CAN_PACKET_PONG:
+            awaiting_response = 0;
+            vesc_id = rx_msg->data[0];
+            //DBG_PRINT("Ping reply from ADDR: 0x%02X, HW_TYPE: %d\n", vesc_id, rx_msg->data[1]);
+            
+            // Only process pong packets from ESCs
+            if (rx_msg->data[1] == HW_TYPE_VESC)
+                
+                first_empty_id = 0xFF;
+                for (uint8_t idn = 0; idn < VESC_CAN_ID_MAX; idn++)
+                {
+                    if (vesc_can_ids[idn] == 0 && first_empty_id == 0xFF)
+                    {
+                        first_empty_id = idn;
+                    }
+                    // If the ID is in the list already, abort
+                    if (vesc_can_ids[idn] == vesc_id)
+                        return;
+                }
+                if (first_empty_id != 0xFF)
+                {
+                    vesc_can_ids[first_empty_id] = vesc_id;
+                    vesc_id_count++;
+                    DBG_PRINT("VESC ID 0x%02X added.\n", vesc_id);
+                }
 
-        // data[0] = ID of controller
-        // data[1] = HW_TYPE_VESC (indicates it's an ESC and not a VESC Express or something)
+            break;
 
-        */
+
+        // case CAN_PACKET_NOTIFY_BOOT:
+        //     // Add this VESC's ID if it's not known already
+        //     vesc_id = rx_msg->id & 0xFF;
+        //     first_empty_id = 0xFF;
+        //     for (uint8_t idn = 0; idn < VESC_CAN_ID_MAX; idn++)
+        //     {
+        //         if (vesc_can_ids[idn] == 0 && first_empty_id == 0xFF)
+        //         {
+        //             first_empty_id = idn;
+        //         }
+        //         // If the ID is in the list already, abort
+        //         if (vesc_can_ids[idn] == vesc_id)
+        //             return;
+        //     }
+        //     if (first_empty_id != 0xFF)
+        //     {
+        //         vesc_can_ids[first_empty_id] = vesc_id;
+        //         vesc_id_count++;
+        //         DBG_PRINT("VESC ID 0x%02X added.\n", vesc_id);
+        //     }
+
+        //     break;
+
         default:
-            DBG_PRINT("Unhandled packet type.\n");
+            //DBG_PRINT("Unhandled packet type.\n");
             break;
     }
 
@@ -471,11 +510,14 @@ void core1_entry()
     absolute_time_t msg_send_time;
     absolute_time_t sd_last_attempt;
     absolute_time_t next_sample;  
-    absolute_time_t comm_retry;  
+    absolute_time_t comm_retry; 
+    absolute_time_t next_ping_time; 
     FRESULT result;
     char time_str[25];
     datetime_t current_time;
     comm_msg request_msg;
+    uint8_t can_ping_addr;
+    uint8_t can_scan_active = 0;
 
     DBG_PRINT("Core 1 launched.\n");
 
@@ -517,6 +559,9 @@ void core1_entry()
     next_sample = get_absolute_time();    
     sd_last_attempt = get_absolute_time();
     comm_retry = delayed_by_ms(get_absolute_time(), 10*COMM_MSG_TIMEOUT_MS);
+    next_ping_time = delayed_by_ms(get_absolute_time(), 2000);  // Start ping scanning 2 seconds after boot
+
+    //DBG_PRINT("Comm. interface init complete.\n");
     while (true)
     {
         mutex_enter_blocking(flash_mutex);  // Don't allow flash erase/write while running core1 code
@@ -570,14 +615,15 @@ void core1_entry()
                     vesc_id = cur_msg.id & 0xFF;        // low byte of ID is VESC unit ID
                     cmd_id = (cur_msg.id & 0xFF00) >> 8;  // second byte of ID is command type
 
+                    //DBG_PRINT("CAN MSG! ID=%08X\n", cur_msg.id);
                     //DBG_PRINT("CAN_ID=%08X VESC ID=0x%02X CMD=%d DAT=%dB\n", cur_msg.id, vesc_id, cmd_id, cur_msg.dlc);
 
                     // If VESC ID is not known, use the ID from the first VESC message we see
-                    if (vesc_id_count == 0)
-                    {
-                        vesc_can_ids[0] = vesc_id;
-                        vesc_id_count++;
-                    }
+                    // if (vesc_id_count == 0)
+                    // {
+                    //     vesc_can_ids[0] = vesc_id;
+                    //     vesc_id_count++;
+                    // }
 
                     //DBG_PRINT("VESC=0x%02X CMD=%d DATA(%d)=%08X%08X\n", vesc_id, cmd_id, cur_msg.dlc, cur_msg.data32[1], cur_msg.data32[0]);
 
@@ -595,41 +641,93 @@ void core1_entry()
 
             // If it's time to poll ESC and an ESC ID is known, send out requests for data
             //if (vesc_id_count != 0 && (next_sample + (100000 / LOG_SAMPLE_RATE)) < get_absolute_time())
-            if(vesc_id_count != 0 && !comm_request_buf.is_empty())
+            //if(vesc_id_count != 0 && !comm_request_buf.is_empty())
+
+
+            // Decide on an ID for the display if one isn't known already  
+            while (!display_can_id)
             {
-                // Decide on an ID for the display if one isn't known already
-                while (!display_can_id)
+                temp_id = (uint8_t) get_rand_32();
+
+                for (uint8_t idn = 0; idn < VESC_CAN_ID_MAX; idn++)
                 {
-                    temp_id = (uint8_t) get_rand_32();
-
-                    for (uint8_t idn = 0; idn < VESC_CAN_ID_MAX; idn++)
+                    // If the ID matches an existing one
+                    if (temp_id == vesc_can_ids[idn])
                     {
-                        // If the ID matches an existing one
-                        if (temp_id == vesc_can_ids[idn])
-                        {
-                            temp_id = 0;
-                        }
-                    }
-
-                    // If the temp ID didn't get cleared, we can use it
-                    if (temp_id && temp_id != 0xFF)
-                    {
-                        display_can_id = temp_id;
+                        temp_id = 0;
                     }
                 }
-        
-                // Process comm requests into CAN request messages
-                while (!comm_request_buf.is_empty())
+
+                // If the temp ID didn't get cleared, we can use it
+                if (temp_id && temp_id != 0xFF)
                 {
-                    request_msg = comm_request_buf.pop();
-                    cur_msg.id = (CAN_PACKET_PROCESS_SHORT_BUFFER << 8) | vesc_can_ids[0] | CAN2040_ID_EFF;
-                    cur_msg.data[0] = display_can_id;
-                    cur_msg.data[1] = 0;         
-                    memcpy(&cur_msg.data[2], request_msg.msg, request_msg.length);
-                    cur_msg.dlc = 2 + request_msg.length;
-                    can_tx_buf.push(cur_msg);
+                    display_can_id = temp_id;
+                    DBG_PRINT("Display CAN ID selected: 0x%02X\n", display_can_id);
                 }
             }
+
+            // // If no VESCs are known send out a ping to the broadcast address 0xFF
+            // if (vesc_id_count == 0 && next_ping_time < get_absolute_time())
+            // {
+            //     DBG_PRINT("Initiating CAN bus scan on connected ESCs.\n");
+            //     // cur_msg.id = (CAN_PACKET_PING << 8) | 0xFF | CAN2040_ID_EFF;
+            //     // cur_msg.dlc = 0;    // no data for ping
+            //     // can_tx_buf.push(cur_msg);
+
+                
+            //     // Use CAN short buffer to send a UART command COMM_PING_CAN
+            //     cur_msg.id = (CAN_PACKET_PROCESS_SHORT_BUFFER << 8) | 0xFF | CAN2040_ID_EFF;
+            //     cur_msg.data[0] = display_can_id;
+            //     cur_msg.data[1] = 0;
+            //     cur_msg.data[2] = COMM_PING_CAN;
+            //     cur_msg.dlc = 3;
+            //     can_tx_buf.push(cur_msg);
+            //     next_ping_time = delayed_by_ms(get_absolute_time(), 1000*COMM_MSG_TIMEOUT_MS);
+            // }   
+            
+            // If no VESCs are known, initiate scan to ping all addresses
+            if (vesc_id_count == 0 && !can_scan_active && next_ping_time < get_absolute_time())
+            {
+                can_scan_active = 1;
+                can_ping_addr = 1;  // Skip address 0
+                DBG_PRINT("Initiating CAN bus probe.\n");
+            }
+            
+            if (can_scan_active && next_ping_time < get_absolute_time())
+            {
+                if (!can_tx_buf.is_full())
+                {
+                    cur_msg.id = (CAN_PACKET_PING << 8) | can_ping_addr++ | CAN2040_ID_EFF;
+                    cur_msg.dlc = 0;    // no data for ping
+                    can_tx_buf.push(cur_msg);       
+                    next_ping_time = delayed_by_ms(get_absolute_time(), 10);
+                    awaiting_response = 0;  // Don't wait, most pings won't get a response
+                }
+
+                // Reached end of address range
+                if (can_ping_addr == 255)
+                {
+                    can_scan_active = 0;
+                    next_ping_time = delayed_by_ms(get_absolute_time(), 5*1000);    // Don't scan again for 5 seconds
+                }
+            }
+            
+            // Process comm requests into CAN request messages
+            while (!comm_request_buf.is_empty())
+            {
+                request_msg = comm_request_buf.pop();
+
+                // Abort if VESC CAN ID is not known yet
+                if (vesc_can_ids[0] == 0)
+                    break;
+                cur_msg.id = (CAN_PACKET_PROCESS_SHORT_BUFFER << 8) | vesc_can_ids[0] | CAN2040_ID_EFF;
+                cur_msg.data[0] = display_can_id;
+                cur_msg.data[1] = 0;         
+                memcpy(&cur_msg.data[2], request_msg.msg, request_msg.length);
+                cur_msg.dlc = 2 + request_msg.length;
+                can_tx_buf.push(cur_msg);
+            }
+
 
             // Transmit messages in the queue when possible
             if (!awaiting_response && !can_tx_buf.is_empty())
@@ -874,6 +972,18 @@ void process_data(uint8_t *data, size_t len)
             // This is the last request packet response, so now we can save the data to the log file
             do_logging = 1;            
             break;
+
+        /*
+        COMM_PING_CAN:
+        B0: COMM_PING_CAN
+        Bn: device ID
+        */
+        // case COMM_PING_CAN:
+        //     DBG_PRINT("PING_CAN: ");
+        //     for (; idx < len; idx++)
+        //         DBG_PRINT("%02X", data[idx]);
+        //     DBG_PRINT("\n");
+        //     break;
 
     }
 
