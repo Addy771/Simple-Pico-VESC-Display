@@ -21,6 +21,7 @@
 #include "hardware/rtc.h"
 #include "hardware/irq.h"
 #include "hardware/watchdog.h"
+#include "hardware/exception.h"
 
 #include "nv_flash.hpp"
 #include "log.hpp"
@@ -160,11 +161,16 @@ int main()
         crash_info.magic = 0xDEADBEEF;
         crash_info.reason = 0;
         crash_info.watchdog_trip = 0;
+        crash_info.fault_caused_reset = 0;
         crash_info.core0_state = C0_ENTRY;
         crash_info.core1_state = C1_OFF;
 
         previous_crash = {};    // clear previous_crash
     }
+
+    // Register exception handlers for core 0
+    exception_set_exclusive_handler(HARDFAULT_EXCEPTION, hardfault_handler);
+    exception_set_exclusive_handler(NMI_EXCEPTION, nmi_handler);
 
     stdio_init_all();
     time_init();  
@@ -557,6 +563,10 @@ void core1_entry()
     comm_msg request_msg;
     uint8_t can_ping_addr;
     uint8_t can_scan_active = 0;
+
+    // Register exception handlers for core 1
+    exception_set_exclusive_handler(HARDFAULT_EXCEPTION, hardfault_handler);
+    exception_set_exclusive_handler(NMI_EXCEPTION, nmi_handler);    
 
     DBG_PRINT("Core 1 launched.\n");
     crash_info.core1_state = C1_ENTRY;

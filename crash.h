@@ -7,6 +7,7 @@ store information preserved between resets to debug crashes
 #define CRASH_H
 
 #include "pico/stdlib.h"
+#include "hardware/exception.h"
 
 typedef enum
 {
@@ -52,7 +53,7 @@ typedef enum
 // Translate state number into a string label
 static inline const char* core1_state_str(core1_status state)
 {
-    switch(state)
+    switch (state)
     {
         case C1_OFF:                return "C1_OFF";
         case C1_ENTRY:              return "C1_ENTRY";
@@ -70,11 +71,28 @@ static inline const char* core1_state_str(core1_status state)
 }
 
 
+// Translate exception number into a string label
+static inline const char* exception_str(int8_t exception)
+{
+    switch (exception)
+    {
+        case HARDFAULT_EXCEPTION:       return "HARDFAULT";
+        case NMI_EXCEPTION:             return "NMI";
+        case SVCALL_EXCEPTION:          return "SVCALL";
+        case PENDSV_EXCEPTION:          return "PENDSV";
+        case SYSTICK_EXCEPTION:         return "SYSTICK";
+        default:                        return "Unknown";
+    }
+}
+
+
 typedef struct
 {
     uint32_t magic;
-    uint8_t reason;
+    int8_t reason;
+    uint32_t core; 
     uint8_t watchdog_trip;
+    uint8_t fault_caused_reset;
     core0_status core0_state;
     core1_status core1_state;
 } crash_info_t;
@@ -82,5 +100,8 @@ typedef struct
 extern volatile crash_info_t crash_info;
 extern volatile crash_info_t previous_crash;
 
+void nmi_handler(void);
+void hardfault_handler(void);
+void exception_handler(int8_t exception);
 
 #endif

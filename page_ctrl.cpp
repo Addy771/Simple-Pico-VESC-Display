@@ -1435,11 +1435,12 @@ void page_controller::page_debug_draw()
 
     u8g2_SetFont(&u8g2, u8g2_font_helvR08_tf);
 
-    draw_string(15, 50, "Watchdog Reset: %s", previous_crash.watchdog_trip? "True" : "False");
-    draw_string(15, 68, "Fault: %d", previous_crash.reason);
-    draw_string(15, 86, "Core 0 crash state: %s", core0_state_str(previous_crash.core0_state));
-    draw_string(15, 104, "Core 1 crash state: %s", core1_state_str(previous_crash.core1_state));
-    // draw_string(15, 122, );
+    draw_string(15, 50, "Watchdog Reset: %s", (previous_crash.watchdog_trip && previous_crash.fault_caused_reset == 0)? "True" : "False");
+    draw_string(15, 68, "Fault: %s", exception_str(previous_crash.reason));
+    if (previous_crash.core == 0 || previous_crash.core == 1)
+        draw_string(15, 86, "Core: %d", previous_crash.core);
+    draw_string(15, 104, "Core 0 crash state: %s", core0_state_str(previous_crash.core0_state));
+    draw_string(15, 122, "Core 1 crash state: %s", core1_state_str(previous_crash.core1_state));
 
     u8g2_SendBuffer(&u8g2);
 }
