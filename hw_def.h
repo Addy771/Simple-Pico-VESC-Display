@@ -60,6 +60,7 @@ UART0 RX | I2C0 SCL | SPI1 CSn | GP13 | 17│●              ●│24 | GP18   
 #define BUTTON_LONG_PRESS_MS 1000        // Length of time in ms a button must be held to be considered a long press
 #define BUTTON_RETRIGGER_MS 250         // Length of time in ms to trigger another button press if the button is held
 #define COMM_MSG_TIMEOUT_MS 10          // Length of time in ms. If the ESC doesn't reply in this period, it's considered disconnected
+#define WATCHDOG_TIMEOUT_MS 2000         // Length of time in ms to reset display if watchdog was not refreshed
 #define ROLLING_AVG_TC 0.3              // Time constant in seconds of averaging used to smooth rapidly fluctuating values
 #define ODOMETER_WRITE_INTERVAL_S 10    // Wait a minimum number of seconds between saving odometer to non-volatile flash storage to reduce flash wear
 #define ODOMETER_WRITE_DISTANCE_M 100   // Wait for a minimum number of meters travelled before updating stored odometer value to reduce flash wear

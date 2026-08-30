@@ -14,7 +14,7 @@
 #ifndef PAGE_CTRL_H
 #define PAGE_CTRL_H
 
-#define PAGE_COUNT 4
+#define PAGE_COUNT 5
 #define BUTTON_COUNT 3  // left, right buttons and center as confirm
 #define EXT_LOAD_COUNT 2    // channel A, B
 
@@ -246,6 +246,7 @@ class page_controller
         void draw_string_lines(uint16_t x_coord, uint16_t y_coord, const char* full_string);        
         void draw_SD_icon(uint16_t x_coord, uint16_t y_coord);
         void draw_ESC_icon(uint16_t x_coord, uint16_t y_coord);
+        void draw_bug_icon(uint16_t x_coord, uint16_t y_coord);
         void draw_overlay_status(void);
         void draw_speed_bar(uint8_t x, uint8_t y, float speed);
         void update_load_outputs(void);
@@ -256,6 +257,7 @@ class page_controller
         void page_log_draw(void);
         void page_cfg_draw(void);
         void page_details_draw(void);
+        void page_debug_draw(void);
 };
 
 

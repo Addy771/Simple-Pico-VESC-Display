@@ -87,6 +87,7 @@ add_executable(${TARGET_NAME}
 	hw_def.c
 	page_ctrl.cpp
 	user_cfg.c
+	crash.c
 	)
 
 # pico_generate_pio_header(${TARGET_NAME} ${CMAKE_CURRENT_LIST_DIR}/Button-debouncer/button_debounce.pio)
@@ -147,6 +148,7 @@ target_link_libraries(${TARGET_NAME}
 	hardware_spi
 	hardware_rtc
 	hardware_irq
+	hardware_watchdog
 	FatFs_SPI
 	u8g2
 	can2040

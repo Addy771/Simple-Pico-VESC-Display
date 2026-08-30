@@ -8,6 +8,8 @@
 #include "pico/sync.h"
 #include "pico/stdlib.h"
 #include "hardware/rtc.h"
+#include "hardware/watchdog.h"
+#include "hardware/structs/watchdog.h"
 #include "nv_flash.hpp"
 #include "log.hpp"
 #include "user_cfg.h"
@@ -15,6 +17,7 @@
 #include <math.h>
 #include <stddef.h>
 #include "version.h"
+#include "crash.h"
 
 extern "C" {
     #include "hw_def.h"
@@ -29,6 +32,7 @@ extern "C" {
 #include "bitmap/batt_unknown.xbm"
 #include "bitmap/esc_connected.xbm"
 #include "bitmap/esc_disconnected.xbm"
+#include "bitmap/code_bug.xbm"
 
 
 volatile extern uint8_t vesc_connected;
@@ -50,6 +54,8 @@ float watt_max;
 uint8_t config_received;
 moving_avg<float> motor_amps_avg;
 moving_avg<float> batt_amps_avg;
+
+volatile extern absolute_time_t core1_last_loop;
 
 
 // Scale value and add SI prefixes to keep length of number printout short
@@ -201,6 +207,7 @@ page_controller::page_controller(void)
     page_fn[1] = (page_draw_fn) &page_controller::page_cfg_draw;    
     page_fn[2] = (page_draw_fn) &page_controller::page_log_draw;
     page_fn[3] = (page_draw_fn) &page_controller::page_details_draw;    
+    page_fn[4] = (page_draw_fn) &page_controller::page_debug_draw;
     page_idx = 0;   // Default page shown on startup
     new_page = 1;
 
@@ -302,6 +309,9 @@ void page_controller::update(void)
         && absolute_time_diff_us(btn_lockouts[PB_RIGHT], btn_poll_time) > BOOTLOADER_BUTTON_TIME_MS*1000
     )
     {
+        //watchdog_disable();   // Not in the SDK version used for this project
+        hw_clear_bits(&watchdog_hw->ctrl, WATCHDOG_CTRL_ENABLE_BITS);
+
         // Inform user that bootloader mode is being entered
         u8g2_ClearBuffer(&u8g2);
         u8g2_SetFont(&u8g2, u8g2_font_10x20_tf);    
@@ -328,8 +338,8 @@ void page_controller::update(void)
         else
             page_idx = PAGE_COUNT-1;    // Wrap to last page
 
-            new_page = 1;
-            btn_lockouts[PB_LEFT] = get_absolute_time();  // Reset time PB was pressed so it's no longer held
+        new_page = 1;
+        btn_lockouts[PB_LEFT] = get_absolute_time();  // Reset time PB was pressed so it's no longer held
     }
     else if (btn_held[PB_RIGHT] && btn_state[PB_LEFT])
     {
@@ -543,6 +553,13 @@ void page_controller::draw_ESC_icon(uint16_t x_coord, uint16_t y_coord)
     {
         u8g2_DrawXBMP(&u8g2, x_coord, y_coord, esc_disconnected_width, esc_disconnected_height, esc_disconnected_bits);
     }
+}
+
+// Draw the bug icon if the display crashed previously
+void page_controller::draw_bug_icon(uint16_t x_coord, uint16_t y_coord)
+{
+    if (previous_crash.magic == 0xDEADBEEF && (previous_crash.reason != 0 || previous_crash.watchdog_trip))
+        u8g2_DrawXBMP(&u8g2, x_coord, y_coord, code_bug_width, code_bug_height, code_bug_bits);
 }
 
 
@@ -823,6 +840,7 @@ void page_controller::page_main_draw(void)
         // Status / Error icons
         draw_SD_icon(70, 1);
         draw_ESC_icon(87, 0);
+        draw_bug_icon(160, 0);
         // Wifi?
         // Load outputs?
 
@@ -1394,6 +1412,34 @@ void page_controller::page_details_draw()
     draw_string(15, 86, "Log filename: %s", log_filename);
     draw_string(15, 104, "Average motor current: %.1f A", motor_amps_avg.get_value());
     draw_string(15, 122, "Average battery current: %.1f A", batt_amps_avg.get_value());
+
+    u8g2_SendBuffer(&u8g2);
+}
+
+
+// Output previous crash details
+void page_controller::page_debug_draw()
+{
+    // Tasks that happen once when the page first appears
+    if (new_page)
+    {
+        new_page = 0;
+    }    
+
+    u8g2_ClearBuffer(&u8g2);
+    draw_overlay_status();
+
+    // Label for page
+    u8g2_SetFont(&u8g2, u8g2_font_t0_18_te);
+    draw_string(5, 28, "Debug Info:");
+
+    u8g2_SetFont(&u8g2, u8g2_font_helvR08_tf);
+
+    draw_string(15, 50, "Watchdog Reset: %s", previous_crash.watchdog_trip? "True" : "False");
+    draw_string(15, 68, "Fault: %d", previous_crash.reason);
+    draw_string(15, 86, "Core 0 crash state: %s", core0_state_str(previous_crash.core0_state));
+    draw_string(15, 104, "Core 1 crash state: %s", core1_state_str(previous_crash.core1_state));
+    // draw_string(15, 122, );
 
     u8g2_SendBuffer(&u8g2);
 }

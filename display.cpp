@@ -20,6 +20,7 @@
 #include "hardware/spi.h"
 #include "hardware/rtc.h"
 #include "hardware/irq.h"
+#include "hardware/watchdog.h"
 
 #include "nv_flash.hpp"
 #include "log.hpp"
@@ -42,6 +43,7 @@ extern "C"
 {
 #include "hw_def.h"
 #include "can2040/src/can2040.h"
+#include "crash.h"
 }
 
 #include <u8g2.h>
@@ -129,6 +131,7 @@ absolute_time_t next_fps_count = current_time_ms;
 absolute_time_t last_odometer_count = current_time_ms;
 absolute_time_t prev_time_sample = current_time_ms;
 absolute_time_t buff_write_time;
+volatile absolute_time_t core1_last_loop = current_time_ms;
 
 page_controller page_ctrl;
 log_data_t *data_pt;
@@ -138,6 +141,31 @@ mutex_t *flash_mutex, *float_mutex;
 // Core 0
 int main()
 {
+    // Check if reset was caused by watchdog or fault
+    if (watchdog_caused_reboot())
+        crash_info.watchdog_trip = 1;
+    else
+        crash_info.watchdog_trip = 0;
+
+    if (crash_info.magic == 0xDEADBEEF && (crash_info.reason != 0 || crash_info.watchdog_trip))
+    {
+        // Copy the previous crash data to a different location so it doesn't get overwritten
+        //previous_crash = crash_info;
+        memcpy(&previous_crash, (const void *)&crash_info, sizeof(crash_info));
+    }
+    else
+    {
+        // Normal boot, initialize crash data
+        // crash_info struct doesn't get zeroed, magic number proves it's not random values
+        crash_info.magic = 0xDEADBEEF;
+        crash_info.reason = 0;
+        crash_info.watchdog_trip = 0;
+        crash_info.core0_state = C0_ENTRY;
+        crash_info.core1_state = C1_OFF;
+
+        previous_crash = {};    // clear previous_crash
+    }
+
     stdio_init_all();
     time_init();  
     cyw43_arch_init();  
@@ -146,6 +174,8 @@ int main()
     init_external_rtc();
 
     get_rand_32();  // First call of this takes ~1ms to generate the seed
+
+    watchdog_enable(WATCHDOG_TIMEOUT_MS, 1);    // 1 = pause on debug
 
     // U8G2 init
     //set_backlight(120);
@@ -235,14 +265,23 @@ int main()
             time_diff_day, time_diff_hour, time_diff_min                    
         );
     }
+    crash_info.core0_state = C0_INIT_DONE;
 
     next_frame_time = get_absolute_time();
     while(1)
     {
+        // Only update watchdog if core1 is not stalled
+        if (time_us_64() - core1_last_loop < (WATCHDOG_TIMEOUT_MS) * 1000)
+            watchdog_update();
+
+        crash_info.core0_state = C0_WAIT_FOR_FRAME;
         sleep_until(next_frame_time);
         next_frame_time = delayed_by_ms(next_frame_time, 1000 / 20);
 
+        crash_info.core0_state = C0_PAGE_UPDATE;
         page_ctrl.update();
+
+        crash_info.core0_state = C0_PAGE_DRAW;
         page_ctrl.draw_page();
 
         // Use idle time between frames to store current time to RTC SRAM
@@ -520,6 +559,7 @@ void core1_entry()
     uint8_t can_scan_active = 0;
 
     DBG_PRINT("Core 1 launched.\n");
+    crash_info.core1_state = C1_ENTRY;
 
     if (rtc_time_valid)
     {
@@ -562,8 +602,10 @@ void core1_entry()
     next_ping_time = delayed_by_ms(get_absolute_time(), 2000);  // Start ping scanning 2 seconds after boot
 
     //DBG_PRINT("Comm. interface init complete.\n");
+    crash_info.core1_state = C1_INIT_DONE;
     while (true)
     {
+        core1_last_loop = get_absolute_time();
         mutex_enter_blocking(flash_mutex);  // Don't allow flash erase/write while running core1 code
 
         if (!config_received && comm_retry < get_absolute_time())
@@ -607,6 +649,7 @@ void core1_entry()
         {
             if (!can_rx_buf.is_empty())
             {
+                crash_info.core1_state = C1_PROCESS_CAN_MSG;
                 cur_msg = can_rx_buf.pop();
 
                 // MS bytes should be 0x8000 for VESC messages
@@ -728,16 +771,17 @@ void core1_entry()
                 can_tx_buf.push(cur_msg);
             }
 
-
+            crash_info.core1_state = C1_TX_CAN_MSG;
             // Transmit messages in the queue when possible
-            if (!awaiting_response && !can_tx_buf.is_empty())
+            if (!awaiting_response && !can_tx_buf.is_empty() && can2040_check_transmit(&cbus))
             {
-                while (can2040_check_transmit(&cbus) == 0); // Block until message can be sent out
+                crash_info.core1_state = C1_TX_CAN_START;
                 cur_msg = can_tx_buf.pop();
 
                 can2040_transmit(&cbus, &cur_msg);
                 msg_send_time = get_absolute_time();    // Record time sent                 
                 awaiting_response = 1;
+                crash_info.core1_state = C1_TX_CAN_SENT;
             }
 
             // If we're waiting for a reply and it has taken too long
@@ -755,6 +799,7 @@ void core1_entry()
             // Send out comm request messages and process the responses
             while (!comm_request_buf.is_empty())
             {
+                crash_info.core1_state = C1_TX_UART_MSG;
                 request_msg = comm_request_buf.pop();
 
                 packet_init(uart0_write, process_data, &vesc_comm);
@@ -766,6 +811,7 @@ void core1_entry()
                 // Reset packet that was sent so it can be reused
                 packet_reset(&vesc_comm);    
 
+                crash_info.core1_state = C1_PROCESS_UART_MSG;
                 // Wait for the response packet and process it
                 if (receive_packet_uart(&vesc_comm) == 0)
                 {
@@ -780,6 +826,7 @@ void core1_entry()
         // CAN gets disabled during SD i/o so CAN interrupts don't affect log writes
 
         // Compute speed in kph
+        crash_info.core1_state = C1_LOG_PREP_DATA;
         mutex_enter_blocking(float_mutex);        
         raw_speed_kph = calc_speed_kph(page_ctrl.esc_data.rpm);
         page_ctrl.esc_data.speed_kph = raw_speed_kph;    
