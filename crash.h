@@ -15,6 +15,11 @@ typedef enum
     C0_INIT_DONE,
     C0_WAIT_FOR_FRAME,
     C0_PAGE_UPDATE,
+    C0_PAGE_UPDATE_CALC,
+    C0_PAGE_UPDATE_FLASH,
+    C0_PAGE_FLASH_STORE,
+    C0_PAGE_UPDATE_BRAKE,
+    C0_PAGE_UPDATE_LOADS,
     C0_PAGE_DRAW
 } core0_status;
 
@@ -28,6 +33,11 @@ static inline const char* core0_state_str(core0_status state)
         case C0_INIT_DONE:          return "C0_INIT_DONE";
         case C0_WAIT_FOR_FRAME:     return "C0_WAIT_FOR_FRAME";
         case C0_PAGE_UPDATE:        return "C0_PAGE_UPDATE";
+        case C0_PAGE_UPDATE_CALC:   return "C0_PAGE_UPDATE_CALC";
+        case C0_PAGE_UPDATE_FLASH:  return "C0_PAGE_UPDATE_FLASH";
+        case C0_PAGE_FLASH_STORE:   return "C0_PAGE_FLASH_STORE";
+        case C0_PAGE_UPDATE_BRAKE:  return "C0_PAGE_UPDATE_BRAKE";
+        case C0_PAGE_UPDATE_LOADS:  return "C0_PAGE_UPDATE_LOADS";
         case C0_PAGE_DRAW:          return "C0_PAGE_DRAW";
         default:                    return "Unknown";
     }
@@ -39,6 +49,9 @@ typedef enum
     C1_OFF,
     C1_ENTRY,
     C1_INIT_DONE,
+    C1_WAIT_FLASH_MUTEX,
+    C1_GENERATE_REQUESTS,
+    C1_COMM_RECEIVE,
     C1_PROCESS_CAN_MSG,
     C1_TX_CAN_MSG,
     C1_TX_CAN_START,
@@ -46,6 +59,7 @@ typedef enum
     C1_PROCESS_UART_MSG,
     C1_TX_UART_MSG,
     C1_LOG_PREP_DATA,
+    C1_LOG_SD_CHECK,
     C1_LOG_SAVE_DATA
 } core1_status;
 
@@ -58,6 +72,9 @@ static inline const char* core1_state_str(core1_status state)
         case C1_OFF:                return "C1_OFF";
         case C1_ENTRY:              return "C1_ENTRY";
         case C1_INIT_DONE:          return "C1_INIT_DONE";
+        case C1_WAIT_FLASH_MUTEX:   return "C1_WAIT_FLASH_MUTEX";
+        case C1_GENERATE_REQUESTS:  return "C1_GENERATE_REQUESTS";
+        case C1_COMM_RECEIVE:       return "C1_COMM_RECEIVE";
         case C1_PROCESS_CAN_MSG:    return "C1_PROCESS_CAN_MSG";
         case C1_TX_CAN_MSG:         return "C1_TX_CAN_MSG";
         case C1_TX_CAN_START:       return "C1_TX_CAN_START";
@@ -65,6 +82,7 @@ static inline const char* core1_state_str(core1_status state)
         case C1_PROCESS_UART_MSG:   return "C1_PROCESS_UART_MSG";
         case C1_TX_UART_MSG:        return "C1_TX_UART_MSG";
         case C1_LOG_PREP_DATA:      return "C1_LOG_PREP_DATA";
+        case C1_LOG_SD_CHECK:       return "C1_LOG_SD_CHECK";
         case C1_LOG_SAVE_DATA:      return "C1_LOG_SAVE_DATA";
         default:                    return "Unknown";
     }

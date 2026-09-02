@@ -351,6 +351,7 @@ void page_controller::update(void)
         btn_lockouts[PB_RIGHT] = get_absolute_time();  // Reset time PB was pressed so it's no longer held
     }
 
+    crash_info.core0_state = C0_PAGE_UPDATE_CALC;
     // Common calculations
     mutex_enter_blocking(&float_mutex);
 
@@ -388,18 +389,21 @@ void page_controller::update(void)
     if ((absolute_time_diff_us(last_odometer_store_time, current_time)/1e6) >= ODOMETER_WRITE_INTERVAL_S \
     && (esc_data.odometer - last_odometer_store_value) >= (ODOMETER_WRITE_DISTANCE_M / 1000.0f))
     {
+        crash_info.core0_state = C0_PAGE_UPDATE_FLASH;
         nv_settings.data.odometer = esc_data.odometer;
         last_odometer_store_value = esc_data.odometer;
         mutex_exit(&float_mutex);   // Release float lock in case other core is waiting for it
         last_odometer_store_time = current_time;
 
         // flash mutex will be entered
+        crash_info.core0_state = C0_PAGE_FLASH_STORE;
         nv_settings.store_data();
 
         DBG_PRINT("Stored odometer value: %.1f km at page %d, block %d\n", esc_data.odometer, nv_settings.page_id, nv_settings.block_id);
         mutex_enter_blocking(&float_mutex);
     }
 
+    crash_info.core0_state = C0_PAGE_UPDATE_BRAKE;
     brake_active = esc_data.current_motor < -0.5;     
     mutex_exit(&float_mutex);     
 
@@ -409,6 +413,7 @@ void page_controller::update(void)
         skip_frames--;
 
     // Handle load output tasks
+    crash_info.core0_state = C0_PAGE_UPDATE_LOADS;
     update_load_outputs();        
 }
 

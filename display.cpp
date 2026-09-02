@@ -53,33 +53,9 @@ extern "C"
 
 #include "page_ctrl.hpp"
 
-/*  TODO: 
-- add a function in pico-led library to blank out the area where text would be
-- improve analog gauge to have adjustable needle len
-- add a horizontal/vertical analog gauge 
-- [x]add bigger font for main data (speed,power)  
-- fix future_real font
-    - bottom pixels are cut off
-    - number 3 is extra thick on the right
-    - add dot, negative, positive and maybe other symbols or alphabet
-- autocentering text function
-- add better debug mode to be entered from display
-- clean up old commented out code
-- adjust rolling average for power/speed to be faster response
-- add odometer
-- whr/km
-- whr used
-
-- add screen saver
-
-
-*/
-
 // Comment out debug when not using
 #define DEBUG
 
-
-//#define BOOTLOADER_BUTTON_TIME 0.5     // time in seconds for buttons to be pressed before entering bootloader mode
 #define DISPLAY_RESET_BUTTON_TIME 2
 #define ODOMETER_UPDATE_INTERVAL_MS 100 // time between odometer updates
 
@@ -615,9 +591,11 @@ void core1_entry()
     crash_info.core1_state = C1_INIT_DONE;
     while (true)
     {
-        core1_last_loop = get_absolute_time();
         mutex_enter_blocking(flash_mutex);  // Don't allow flash erase/write while running core1 code
+        core1_last_loop = get_absolute_time();
+        
 
+        crash_info.core1_state = C1_GENERATE_REQUESTS;
         if (!config_received && comm_retry < get_absolute_time())
         {
             // Generate config request messages
@@ -654,6 +632,7 @@ void core1_entry()
             comm_request_buf.push(request_msg);
         }
 
+        crash_info.core1_state = C1_COMM_RECEIVE;
         // Handle CAN messages if CAN mode is enabled
         if (page_ctrl.nv_settings.data.flags & COMM_USE_CAN)
         {
@@ -842,6 +821,7 @@ void core1_entry()
         page_ctrl.esc_data.speed_kph = raw_speed_kph;    
         mutex_exit(float_mutex);    
 
+        crash_info.core1_state = C1_LOG_SD_CHECK;
         // Check if SD card was removed
         if ((sd_status == SD_PRESENT || sd_status == SD_ERROR) 
 #ifndef SD_CARD_POLLING
@@ -881,6 +861,7 @@ void core1_entry()
         // Try to save data to log, even if there was an error previously
         else if(do_logging && vesc_connected && (sd_status == SD_PRESENT || sd_status == SD_ERROR))
         {
+            crash_info.core1_state = C1_LOG_SAVE_DATA;
             do_logging = 0;
             can2040_stop(&cbus);
             result = append_data_pt(data_pt);       
@@ -890,6 +871,7 @@ void core1_entry()
                 DBG_PRINT("append_data_pt(): %s\n", FRESULT_str(result));            
         }
 
+        crash_info.core1_state = C1_WAIT_FLASH_MUTEX;   // Must set this now so no code it outside mutex
         mutex_exit(flash_mutex);    // Release lock        
     }
 }
