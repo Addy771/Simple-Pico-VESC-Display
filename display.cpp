@@ -443,7 +443,7 @@ void receive_packet_can(can2040_msg *rx_msg, uint8_t can_command_id)
             
             // Only process pong packets from ESCs
             if (rx_msg->data[1] == HW_TYPE_VESC)
-                
+            {
                 first_empty_id = 0xFF;
                 for (uint8_t idn = 0; idn < VESC_CAN_ID_MAX; idn++)
                 {
@@ -461,7 +461,7 @@ void receive_packet_can(can2040_msg *rx_msg, uint8_t can_command_id)
                     vesc_id_count++;
                     DBG_PRINT("VESC ID 0x%02X added.\n", vesc_id);
                 }
-
+            }
             break;
 
 
@@ -523,7 +523,6 @@ void core1_entry()
 
     // CAN related
     can2040_msg cur_msg;
-    uint8_t vesc_id;
     uint8_t cmd_id;
     uint8_t temp_id;
     //page_ctrl.nv_settings.data.flags |= COMM_USE_CAN;    ///// debug override
@@ -643,7 +642,7 @@ void core1_entry()
                 // MS bytes should be 0x8000 for VESC messages
                 if ((cur_msg.id & 0xFFFF0000) == 0x80000000)
                 {
-                    vesc_id = cur_msg.id & 0xFF;        // low byte of ID is VESC unit ID
+                    //vesc_id = cur_msg.id & 0xFF;        // low byte of ID is VESC unit ID
                     cmd_id = (cur_msg.id & 0xFF00) >> 8;  // second byte of ID is command type
 
                     //DBG_PRINT("CAN MSG! ID=%08X\n", cur_msg.id);
