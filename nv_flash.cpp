@@ -1,25 +1,23 @@
 /*  */
 #include <cstdlib>
 #include <hardware/flash.h>
-#include <hardware/sync.h>
-#include <pico/sync.h>
+// #include <hardware/sync.h>
+// #include <pico/sync.h>
 #include <pico/stdlib.h>
-#include <pico/malloc.h>
+#include <pico/flash.h>
+// #include <pico/malloc.h>
 #include <string.h>
 #include "nv_flash.hpp"
 
 
 /// @brief A non-volatile data manager which uses the code flash memory for storage
-/// @param flash_write_lock A mutex which will be used to suspend execution on the other processor core
-void nv_flash_storage::init(mutex_t *flash_write_lock)
+void nv_flash_storage::init(void)
 {
     uint8_t *flash_byte;
     uint address;
 
     static_assert(sizeof(data) <= BLOCK_SIZE, "Non-volatile storage data exceeds block size! Increase BLOCK_SIZE.");
 
-    // Store the mutex we'll use when doing flash writes
-    write_lock = flash_write_lock;
 
     // Probe the NV storage sector to see if data exists already
     page_id = -1;
@@ -56,13 +54,17 @@ void nv_flash_storage::init(mutex_t *flash_write_lock)
 }
 
 
-/// @brief Write the data structure into the non-volatile flash memory
-void nv_flash_storage::store_data()
+/// @brief Wrapper to init flash safety code on the core that isn't doing flash writes
+void nv_flash_storage::alt_core_init(void)
 {
-    uint saved_interrupts;
+    flash_safe_execute_core_init();
+}
 
-    mutex_enter_blocking(write_lock);   // Enter mutex to stop other core from doing flash reads
-    saved_interrupts = save_and_disable_interrupts();   // Disable interrupts to make sure other core doesn't run any code
+
+/// @brief Performs the flash erase/program operations
+static void nv_flash_storage::flash_operations(void)
+{
+    uint8_t page_buffer[FLASH_PAGE_SIZE];
 
     // Figure out the page and block to write to next
     if (page_id < MAX_PAGES - 1)
@@ -87,9 +89,6 @@ void nv_flash_storage::store_data()
     }
 
 
-    uint8_t *page_buffer;
-    page_buffer = (uint8_t *) malloc(FLASH_PAGE_SIZE);
-
     // Fill page with 1's so that unused data areas don't get written
     memset(page_buffer, 0xFF, FLASH_PAGE_SIZE);
 
@@ -98,11 +97,27 @@ void nv_flash_storage::store_data()
 
     // Write out the data
     flash_range_program(FLASH_TARGET_OFFSET + page_id*FLASH_PAGE_SIZE, page_buffer, FLASH_PAGE_SIZE);
+}
 
-    restore_interrupts(saved_interrupts);
-    mutex_exit(write_lock);     // Release lock now that flash erase/write is complete
 
-    free(page_buffer);
+/// @brief Write the data structure into the non-volatile flash memory
+void nv_flash_storage::store_data()
+{
+    int rc;
 
+    // When safe, run flash_operations() with maximum timeout for enter/exit
+    rc = flash_safe_execute(&nv_flash_storage::static_wrapper, this, UINT32_MAX);
+
+    hard_assert(rc == PICO_OK);
+}
+
+
+/// @brief Wrapper needed to match flash_safe_execute's expected signature
+static void nv_flash_storage::static_wrapper(void *Param)
+{
+    // Cast void param back to the class type
+    nv_flash_storage* instance = static_cast<nv_flash_storage*>(Param);
+
+    instance->flash_operations();
 }
 

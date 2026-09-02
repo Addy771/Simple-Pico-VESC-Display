@@ -138,7 +138,6 @@ page_controller::page_controller(void)
 {
     absolute_time_t btn_init;
     mutex_init(&float_mutex);   // Only one core can use float ROM functions at a time
-    mutex_init(&flash_mutex);   // Other core must halt when flash is being written
     
     // Button debouncing init
     btn_gpio[PB_LEFT] = PB_LEFT_GPIO;
@@ -161,7 +160,7 @@ page_controller::page_controller(void)
 
     // Read load mode settings from flash
     // Init flash storage system
-    nv_settings.init(&flash_mutex);
+    nv_settings.init();
     load_mode[LOAD_A] = nv_settings.data.load_modes & 0x0F;         // Lower nibble has A channel mode
     load_mode[LOAD_B] = (nv_settings.data.load_modes & 0xF0) >> 4;  // Upper nibble has B channel mode
 

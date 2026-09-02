@@ -227,7 +227,6 @@ class page_controller
         uint8_t load_gpio[EXT_LOAD_COUNT];
         uint8_t u8log_buf[U8LOG_WIDTH*U8LOG_HEIGHT];
         mutex_t float_mutex;
-        mutex_t flash_mutex;
         nv_flash_storage nv_settings;
         log_data_t esc_data;
         moving_avg<float> v_in_smoothed;

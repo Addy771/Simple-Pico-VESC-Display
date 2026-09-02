@@ -112,7 +112,7 @@ volatile absolute_time_t core1_last_loop = current_time_ms;
 
 page_controller page_ctrl;
 log_data_t *data_pt;
-mutex_t *flash_mutex, *float_mutex;
+mutex_t *float_mutex;
 
 
 // Core 0
@@ -208,7 +208,6 @@ int main()
 
     // Set up some pointers that core1 needs to access
     data_pt = &page_ctrl.esc_data; 
-    flash_mutex = &page_ctrl.flash_mutex;
     float_mutex = &page_ctrl.float_mutex;
     multicore_launch_core1(core1_entry);
 
@@ -527,7 +526,7 @@ void core1_entry()
     uint8_t vesc_id;
     uint8_t cmd_id;
     uint8_t temp_id;
-    page_ctrl.nv_settings.data.flags |= COMM_USE_CAN;    ///// debug override
+    //page_ctrl.nv_settings.data.flags |= COMM_USE_CAN;    ///// debug override
     absolute_time_t msg_send_time;
     absolute_time_t sd_last_attempt;
     absolute_time_t next_sample;  
@@ -539,6 +538,8 @@ void core1_entry()
     comm_msg request_msg;
     uint8_t can_ping_addr;
     uint8_t can_scan_active = 0;
+
+    page_ctrl.nv_settings.alt_core_init();     // Allows core 0 to stop this core while doing flash operations
 
     // Register exception handlers for core 1
     exception_set_exclusive_handler(HARDFAULT_EXCEPTION, hardfault_handler);
@@ -591,9 +592,7 @@ void core1_entry()
     crash_info.core1_state = C1_INIT_DONE;
     while (true)
     {
-        mutex_enter_blocking(flash_mutex);  // Don't allow flash erase/write while running core1 code
-        core1_last_loop = get_absolute_time();
-        
+        core1_last_loop = get_absolute_time();      
 
         crash_info.core1_state = C1_GENERATE_REQUESTS;
         if (!config_received && comm_retry < get_absolute_time())
@@ -869,10 +868,7 @@ void core1_entry()
 
             if (result != FR_OK)
                 DBG_PRINT("append_data_pt(): %s\n", FRESULT_str(result));            
-        }
-
-        crash_info.core1_state = C1_WAIT_FLASH_MUTEX;   // Must set this now so no code it outside mutex
-        mutex_exit(flash_mutex);    // Release lock        
+        } 
     }
 }
 

@@ -48,13 +48,13 @@ typedef enum
 
 class nv_flash_storage
 {
-    private:
-        mutex_t *write_lock;
-
     public:
         nv_flash_struct data;
-        void init(mutex_t *flash_write_lock);
+        void init(void);
+        void alt_core_init(void);
         void store_data();
+        void flash_operations(void);
+        static void static_wrapper(void *Param);        
         uint8_t block_id;
         int8_t page_id;
 
