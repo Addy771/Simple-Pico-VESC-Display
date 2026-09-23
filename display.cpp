@@ -72,7 +72,7 @@ typedef struct
 } comm_msg;
 
 static struct can2040 cbus;
-volatile circular_buf<can2040_msg, 20> can_rx_buf;
+volatile circular_buf<can2040_msg, 50> can_rx_buf;
 circular_buf<can2040_msg, 10> can_tx_buf;
 circular_buf<comm_msg, 10> comm_request_buf;
 uint8_t vesc_can_ids[VESC_CAN_ID_MAX];
@@ -260,10 +260,14 @@ int main()
         next_frame_time = delayed_by_ms(next_frame_time, 1000 / 20);
 
         crash_info.core0_state = C0_PAGE_UPDATE;
+        pt_page_update.start();
         page_ctrl.update();
+        pt_page_update.stop();
 
         crash_info.core0_state = C0_PAGE_DRAW;
+        pt_page_draw.start();
         page_ctrl.draw_page();
+        pt_page_draw.stop();
 
         // Use idle time between frames to store current time to RTC SRAM
         rtc_get_datetime(&sram_time);
@@ -862,7 +866,11 @@ void core1_entry()
             crash_info.core1_state = C1_LOG_SAVE_DATA;
             do_logging = 0;
             can2040_stop(&cbus);
-            result = append_data_pt(data_pt);       
+
+            pt_log_write.start();               
+            result = append_data_pt(data_pt);    
+            pt_log_write.stop(); 
+                       
             can2040_start(&cbus, frequency_count_khz(CLOCKS_FC0_SRC_VALUE_CLK_SYS)*1000, CAN_BAUDRATE, CAN_RX_GPIO, CAN_TX_GPIO);
 
             if (result != FR_OK)

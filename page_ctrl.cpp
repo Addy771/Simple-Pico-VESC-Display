@@ -55,6 +55,10 @@ uint8_t config_received;
 moving_avg<float> motor_amps_avg;
 moving_avg<float> batt_amps_avg;
 
+volatile perf_tracker pt_page_update;
+volatile perf_tracker pt_page_draw;
+volatile perf_tracker pt_log_write;
+
 volatile extern absolute_time_t core1_last_loop;
 
 
@@ -1447,6 +1451,34 @@ void page_controller::page_debug_draw()
     draw_string(15, 122, "Core 1 crash state: %s", core1_state_str(previous_crash.core1_state));
 
     u8g2_SendBuffer(&u8g2);
+}
+
+
+// Display execution time of various tasks
+void page_controller::page_performance_draw()
+{
+    // Tasks that happen once when the page first appears
+    if (new_page)
+    {
+        new_page = 0;
+    }    
+
+    u8g2_ClearBuffer(&u8g2);
+    draw_overlay_status();
+
+    // Label for page
+    u8g2_SetFont(&u8g2, u8g2_font_t0_18_te);
+    draw_string(5, 28, "Software Performance:");
+
+    u8g2_SetFont(&u8g2, u8g2_font_helvR08_tf);
+
+    draw_string(15, 50,  "             Min. (us)  Max. (us)");
+    draw_string(15, 68,  "Page Update: %9d  %9d", pt_page_update.duration_min, pt_page_update.duration_max);
+    draw_string(15, 86,  "  Page Draw: %9d  %9d", pt_page_draw.duration_min, pt_page_draw.duration_max);
+    draw_string(15, 104, "  Log Write: %9d  %9d", pt_log_write.duration_min, pt_log_write.duration_max);
+    //draw_string(15, 122, "");
+
+    u8g2_SendBuffer(&u8g2);    
 }
 
 

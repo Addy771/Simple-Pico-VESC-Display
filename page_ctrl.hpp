@@ -32,6 +32,10 @@ extern float wheel_diameter;
 extern float watt_min;
 extern float watt_max;
 extern uint8_t config_received;
+class perf_tracker;
+extern volatile perf_tracker pt_page_update;
+extern volatile perf_tracker pt_page_draw;
+extern volatile perf_tracker pt_log_write;
 
 typedef enum
 {
@@ -257,6 +261,44 @@ class page_controller
         void page_cfg_draw(void);
         void page_details_draw(void);
         void page_debug_draw(void);
+        void page_performance_draw(void);
+};
+
+
+// Stopwatch class to time execution of code sections
+class perf_tracker
+{
+    private:
+        absolute_time_t time_start;
+
+    public:
+        uint32_t duration_min;
+        uint32_t duration_max;
+
+        perf_tracker(void)
+        {
+            duration_min = UINT32_MAX;
+            duration_max = 0;
+        }
+
+
+        void start(void)
+        {
+            time_start = get_absolute_time();
+        }
+
+
+        void stop(void)
+        {
+            absolute_time_t time_stop = get_absolute_time();
+            uint32_t duration = time_stop - time_start;
+
+            if (duration < duration_min)
+                duration_min = duration;
+
+            if (duration > duration_max)
+                duration_max = duration;
+        }
 };
 
 
