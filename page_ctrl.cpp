@@ -210,7 +210,8 @@ page_controller::page_controller(void)
     page_fn[1] = (page_draw_fn) &page_controller::page_cfg_draw;    
     page_fn[2] = (page_draw_fn) &page_controller::page_log_draw;
     page_fn[3] = (page_draw_fn) &page_controller::page_details_draw;    
-    page_fn[4] = (page_draw_fn) &page_controller::page_debug_draw;
+    page_fn[4] = (page_draw_fn) &page_controller::page_performance_draw;
+    page_fn[5] = (page_draw_fn) &page_controller::page_debug_draw;
     page_idx = 0;   // Default page shown on startup
     new_page = 1;
 

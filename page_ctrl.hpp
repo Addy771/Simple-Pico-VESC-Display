@@ -14,7 +14,7 @@
 #ifndef PAGE_CTRL_H
 #define PAGE_CTRL_H
 
-#define PAGE_COUNT 5
+#define PAGE_COUNT 6
 #define BUTTON_COUNT 3  // left, right buttons and center as confirm
 #define EXT_LOAD_COUNT 2    // channel A, B
 
