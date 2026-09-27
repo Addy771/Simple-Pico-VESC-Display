@@ -399,7 +399,7 @@ void receive_packet_can(can2040_msg *rx_msg, uint8_t can_command_id)
 {
     static uint8_t rx_buffer[PACKET_MAX_PL_LEN];
     uint16_t buffer_len;
-    uint8_t vesc_id, first_empty_id;
+    uint8_t vesc_id, first_empty_id, tmp_id, usable_id;
 
     switch (can_command_id)
     {
@@ -444,6 +444,41 @@ void receive_packet_can(can2040_msg *rx_msg, uint8_t can_command_id)
             awaiting_response = 0;
             vesc_id = rx_msg->data[0];
             //DBG_PRINT("Ping reply from ADDR: 0x%02X, HW_TYPE: %d\n", vesc_id, rx_msg->data[1]);
+
+            // If VESC device is using the same address as the display, change the display ID
+            if (vesc_id == display_can_id)
+            {
+                tmp_id = display_can_id++;  // Start with the next ID
+
+                // Iterate until a usable ID is found or we've wrapped around the whole address space
+                while (tmp_id != display_can_id)
+                {
+                    usable_id = 1;
+                    // Check if the ID is valid and not in use already
+                    for (uint8_t idn = 0; idn < VESC_CAN_ID_MAX; idn++)
+                    {
+                        // Don't use broadcast address or 0
+                        if (tmp_id == 0 || tmp_id == 255)
+                            usable_id = 0;
+
+                        // Don't use a known ID or the one that was currently sent
+                        if (tmp_id == vesc_can_ids[idn] || tmp_id == vesc_id)
+                            usable_id = 0;
+                    }
+
+                    // Select ID and stop searching if it's valid
+                    if (usable_id)
+                    {
+                        display_can_id = tmp_id;
+                        break;
+                    }
+                    else
+                    {
+                        tmp_id++;
+                    }
+                }
+
+            }
             
             // Only process pong packets from ESCs
             if (rx_msg->data[1] == HW_TYPE_VESC)
@@ -541,6 +576,7 @@ void core1_entry()
     comm_msg request_msg;
     uint8_t can_ping_addr;
     uint8_t can_scan_active = 0;
+    uint8_t can_scan_complete = 0;
 
     page_ctrl.nv_settings.alt_core_init();     // Allows core 0 to stop this core while doing flash operations
 
@@ -719,8 +755,8 @@ void core1_entry()
             //     next_ping_time = delayed_by_ms(get_absolute_time(), 1000*COMM_MSG_TIMEOUT_MS);
             // }   
             
-            // If no VESCs are known, initiate scan to ping all addresses
-            if (vesc_id_count == 0 && !can_scan_active && next_ping_time < get_absolute_time())
+            // initiate scan to ping all addresses if it wasn't done yet
+            if (!can_scan_complete && !can_scan_active && next_ping_time < get_absolute_time())
             {
                 can_scan_active = 1;
                 can_ping_addr = 1;  // Skip address 0
@@ -742,6 +778,15 @@ void core1_entry()
                 if (can_ping_addr == 255)
                 {
                     can_scan_active = 0;
+                    can_scan_complete = 0;
+
+                    // If any VESC IDs were gathered, consider scan complete
+                    for (uint8_t idn = 0; idn < VESC_CAN_ID_MAX; idn++)
+                    {
+                        if (vesc_can_ids[idn] != 0)
+                            can_scan_complete = 1;
+                    }
+
                     next_ping_time = delayed_by_ms(get_absolute_time(), 5*1000);    // Don't scan again for 5 seconds
                 }
             }
