@@ -15,6 +15,7 @@
 
 extern page_controller page_ctrl;
 uint8_t sd_status = SD_NOT_PRESENT;
+volatile log_data_combined_t log_data;
 
 // When adding another value, update append_data_pt() and log.hpp as well
 const char csv_head[] = "ms_today,input_voltage,temp_mos_max,temp_mos_1,temp_mos_2,temp_mos_3,"
@@ -24,6 +25,45 @@ const char csv_head[] = "ms_today,input_voltage,temp_mos_max,temp_mos_1,temp_mos
                         "vesc_id,d_axis_voltage,q_axis_voltage,input_power,speed_kph,adc1_decoded,adc2_decoded,odometer\n";
 
 char log_filename[30] = "";
+
+
+// Write the csv column names depending on how many ESCs are connected
+void generate_csv_head(FIL *log_file, uint8_t esc_count)
+{
+    #define CSV_COMMON_HEADER(type, name)   \
+        f_printf(log_file, #name ",");
+
+    #define CSV_ESC_HEADER(type, name)  \
+        for (uint8_t esc = 0; esc < esc_count; esc++)   \
+            f_printf(log_file, "ESC%d_%s", esc + 1, #name);
+
+    COMMON_LOG_FIELDS(CSV_COMMON_HEADER)
+    ESC_LOG_FIELDS(CSV_ESC_HEADER)
+
+    f_printf(log_file, "\n");
+}
+
+
+#define FORMAT_float            "%.3f,"
+#define FORMAT_int32_t          "%d,"
+#define FORMAT_mc_fault_code    "%d,"
+
+
+// Write a single row of data values depending on how many ESCs are connected
+void write_data_row(FIL *log_file, uint8_t esc_count)
+{
+    #define CSV_COMMON_VALUE(type, name)    \
+        f_printf(log_file, FORMAT_##type, log_data.common.name);
+
+    #define CSV_ESC_VALUE(type, name)   \
+        for (uint8_t esc = 0; esc < esc_count; esc++)   \
+            f_printf(log_file, FORMAT_##type, log_data.esc[esc].name);
+
+    COMMON_LOG_FIELDS(CSV_COMMON_VALUE)
+    ESC_LOG_FIELDS(CSV_ESC_VALUE)
+
+    f_printf(log_file, "\n");
+}
 
 
 void print_and_log(const char* format, ...)
